@@ -15,9 +15,9 @@ function login(){return `<div style="min-height:100vh;display:grid;place-items:c
 
 function appShell(){
  const isField=profile?.role==="employee"||profile?.role==="crew_lead";
- const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","financial"];
+ const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","team","financial"];
  return `<div class="top"><div class="row"><div><div class="brand">Nolan Electric</div><div class="sub">${esc(profile?.full_name||"User")} · ${esc(profile?.role||"")}</div></div><button id="logout" class="btn">Sign Out</button></div></div>
- <div class="wrap"><div class="nav">${tabs.map(t=>`<button data-tab="${t}" class="${state.tab===t?"btn primary":"btn"}">${t==="field"?"My Day":t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>
+ <div class="wrap"><div class="nav">${tabs.map(t=>`<button data-tab="${t}" class="${state.tab===t?"btn primary":"btn"}">${t==="field"?"My Day":t==="team"?"Team":t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>
  ${state.tab==="dashboard"?dashboard():state.tab==="customers"?customers():state.tab==="jobs"?jobs():state.tab==="financial"?financial():field()}</div>${state.selected?jobModal(state.selected):""}`;
 }
 
