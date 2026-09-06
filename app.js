@@ -18,9 +18,11 @@ function login(){return `<div style="min-height:100vh;display:grid;place-items:c
 function appShell(){
  const isField=isFieldUser();
  const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","team","financial"];
+ // Field users must never render an admin view, even if an old browser session left the tab set to dashboard.
+ const view=isField?(state.tab==="jobs"?jobs():field()):(state.tab==="dashboard"?dashboard():state.tab==="customers"?customers():state.tab==="jobs"?jobs():state.tab==="team"?team():state.tab==="financial"?financial():dashboard());
  return `<div class="top"><div class="row"><div><div class="brand">Nolan Electric</div><div class="sub">${esc(profile?.full_name||"User")} · ${esc(profile?.role||"")}</div></div><button id="logout" class="btn">Sign Out</button></div></div>
  <div class="wrap"><div class="nav">${tabs.map(t=>`<button data-tab="${t}" class="${state.tab===t?"btn primary":"btn"}">${t==="field"?"My Day":t==="team"?"Team":t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>
- ${state.tab==="dashboard"?dashboard():state.tab==="customers"?customers():state.tab==="jobs"?jobs():state.tab==="team"?team():state.tab==="financial"?financial():field()}</div>${state.selected?jobModal(state.selected):""}`;
+ ${view}</div>${state.selected?jobModal(state.selected):""}`;
 }
 
 function dashboard(){
@@ -99,6 +101,7 @@ function field(){
 function jobModal(j){
  const tasks=state.tasks.filter(t=>t.job_id===j.id);
  const members=state.members.filter(m=>m.job_id===j.id);
+ const assignable=state.profiles.filter(p=>p.active && p.role!=="customer");
  return `<div class="modal"><div class="sheet"><div class="row"><div><h2>${esc(j.job_number)} · ${esc(j.name)}</h2><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div></div><button class="btn" id="close">Close</button></div><hr>
  <div class="grid">
  <div class="card metric"><span>Contract</span><b>${money(j.contract_amount)}</b></div>
@@ -109,12 +112,11 @@ function jobModal(j){
  <p>${esc(j.description||"No scope/description entered.")}</p>
  <h3>Status</h3><div class="status-buttons">${["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid"].map(s=>`<button class="pill ${j.status===s?"active":""}" data-status="${s}" data-jobstatus="${j.id}">${statusLabel(s)}</button>`).join("")}</div>
  <h3>Tasks <button id="addTask" class="btn" style="float:right">+ Task</button></h3>
- <div id="tasks">${tasks.map(t=>`<label class="job" style="display:block;margin-bottom:8px"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}${t.description?`<div class="sub">${esc(t.description)}</div>`:""}</label>`).join("")||"<div class='empty'>No tasks yet. Add the first task.</div>"}</div>
- <h3>Crew</h3><div class="list">${members.map(m=>`<div class="job"><b>${esc(m.profiles?.full_name||"Crew member")}</b><div class="sub">${esc(m.profiles?.role||"")}</div></div>`).join("")||"<div class='empty'>No crew assigned yet.</div>"}</div>
+ <div id="tasks">${tasks.map(t=>`<div class="job" style="margin-bottom:8px"><label style="display:block"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}</label><div class="sub">${t.description?esc(t.description)+" · ":""}${t.assigned_to?"Assigned to "+esc(state.profiles.find(p=>p.id===t.assigned_to)?.full_name||"team member"):"Unassigned"}</div><select class="task-assignee" data-task-assignee="${t.id}" style="margin-top:7px"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}" ${t.assigned_to===p.id?"selected":""}>${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select></div>`).join("")||"<div class='empty'>No tasks yet. Add the first task.</div>"}</div>
+ <h3>Crew <button id="assignCrew" class="btn" style="float:right">+ Assign Crew</button></h3><div class="list">${members.map(m=>`<div class="job"><div class="row"><div><b>${esc(m.profiles?.full_name||"Crew member")}</b><div class="sub">${esc(m.profiles?.role||"")}</div></div><button class="btn" data-remove-crew="${m.profile_id}">Remove</button></div></div>`).join("")||"<div class='empty'>No crew assigned yet.</div>"}</div>
  <h3>Field Updates</h3><div class="field-actions"><button class="btn primary" id="addNote">ADD NOTE</button><button class="btn" id="addMaterial">NEED MATERIAL</button><button class="btn" id="addPhoto">ADD PHOTO</button></div>
  </div></div>`;
 }
-
 async function load(){
  state.loading=true; render();
  try{
@@ -126,17 +128,22 @@ async function load(){
   state.profiles=pr.data||[];
   const jr=await sb.from("jobs").select("*,customers(name)").order("created_at",{ascending:false});
   if(jr.error)throw new Error("Jobs could not be loaded: "+jr.error.message);
-  state.jobs=jr.data||[];
+  const allJobs=jr.data||[];
+  if(isFieldUser()){
+   const me=await sb.from("job_members").select("job_id").eq("profile_id",session.user.id);
+   if(me.error)throw new Error("Assigned jobs could not be loaded: "+me.error.message);
+   const ids=new Set((me.data||[]).map(x=>x.job_id));
+   state.jobs=allJobs.filter(j=>ids.has(j.id));
+  }else state.jobs=allJobs;
   if(state.selected){
    const tr=await sb.from("job_tasks").select("*").eq("job_id",state.selected.id).order("created_at");
    state.tasks=tr.error?[]:(tr.data||[]);
    const mr=await sb.from("job_members").select("job_id,profile_id,profiles(full_name,role)").eq("job_id",state.selected.id);
    state.members=mr.error?[]:(mr.data||[]);
-  }
+  }else{state.tasks=[];state.members=[];}
  }catch(err){console.error(err);toast(err?.message||"Could not load data from Supabase.")}
  state.loading=false;render();
 }
-
 function modalForm(title,body,onSubmit){
  const wrap=document.createElement("div");wrap.className="modal";
  wrap.innerHTML=`<div class="sheet"><div class="row"><h2>${title}</h2><button class="btn" id="x">Close</button></div>${body}</div>`;
@@ -196,7 +203,9 @@ document.addEventListener("click",async e=>{
  const jb=e.target.closest("[data-job]");if(jb){state.selected=state.jobs.find(x=>x.id===jb.dataset.job);await load();return}
  if(e.target.id==="close"){state.selected=null;render();return}
  const st=e.target.closest("[data-jobstatus]");if(st){const id=st.dataset.jobstatus,s=st.dataset.status;const r=await sb.from("jobs").update({status:s}).eq("id",id);if(r.error)toast(r.error.message);else{state.selected={...state.selected,status:s};await load()}return}
- if(e.target.id==="addTask"){if(!state.selected)return;modalForm("Add Task",`<form class="form"><input name="title" placeholder="Task" required><textarea name="description" placeholder="Task details"></textarea><button class="btn primary" type="submit">Add Task</button></form>`,async f=>sb.from("job_tasks").insert({job_id:state.selected.id,title:f.get("title"),description:f.get("description"),status:"open"}));return}
+ if(e.target.id==="addTask"){if(!state.selected)return;const assignable=state.profiles.filter(p=>p.active&&p.role!=="customer");modalForm("Add Task",`<form class="form"><input name="title" placeholder="Task" required><textarea name="description" placeholder="Task details"></textarea><select name="assigned_to"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Add Task</button></form>`,async f=>sb.from("job_tasks").insert({job_id:state.selected.id,title:f.get("title"),description:f.get("description"),assigned_to:f.get("assigned_to")||null,status:"open"}));return}
+ if(e.target.id==="assignCrew"){if(!state.selected)return;const assigned=new Set(state.members.map(m=>m.profile_id));const available=state.profiles.filter(p=>p.active&&p.role!=="customer"&&!assigned.has(p.id));if(!available.length){toast("Everyone is already assigned to this job.");return}modalForm("Assign Crew",`<form class="form"><select name="profile_id">${available.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Assign to Job</button></form>`,async f=>sb.from("job_members").insert({job_id:state.selected.id,profile_id:f.get("profile_id")}));return}
+ const rm=e.target.closest("[data-remove-crew]");if(rm){if(!state.selected)return;const r=await sb.from("job_members").delete().eq("job_id",state.selected.id).eq("profile_id",rm.dataset.removeCrew);if(r.error)toast(r.error.message);else await load();return}
  if(e.target.id==="addNote"||e.target.id==="quickNote"){if(!state.selected){toast("Open a job first.");return}modalForm("Add Field Note",`<form class="form"><textarea name="message" required placeholder="What happened on the job?"></textarea><button class="btn primary" type="submit">Save Note</button></form>`,async f=>sb.from("job_activity").insert({job_id:state.selected.id,profile_id:session.user.id,event_type:"field_note",message:f.get("message")}));return}
  if(e.target.id==="addMaterial"||e.target.id==="quickMaterial"){if(!state.selected){toast("Open a job first.");return}modalForm("Material Request",`<form class="form"><input name="item" required placeholder="Material"><input name="quantity" type="number" step=".01" value="1"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary" type="submit">Request Material</button></form>`,async f=>sb.from("material_requests").insert({job_id:state.selected.id,requested_by:session.user.id,item:f.get("item"),quantity:Number(f.get("quantity")||1),notes:f.get("notes")}));return}
  if(e.target.id==="addPhoto"){toast("Photo storage is the next field feature.")}
@@ -205,7 +214,8 @@ document.addEventListener("click",async e=>{
 });
 
 document.addEventListener("change",async e=>{
- const id=e.target.dataset.task;if(id){const r=await sb.from("job_tasks").update({status:e.target.checked?"complete":"open",completed_at:e.target.checked?new Date().toISOString():null}).eq("id",id);if(r.error)toast(r.error.message);await load()}
+ const id=e.target.dataset.task;if(id){const r=await sb.from("job_tasks").update({status:e.target.checked?"complete":"open",completed_at:e.target.checked?new Date().toISOString():null}).eq("id",id);if(r.error)toast(r.error.message);await load();return}
+ const taskId=e.target.dataset.taskAssignee;if(taskId){const assigned=e.target.value||null;const r=await sb.from("job_tasks").update({assigned_to:assigned}).eq("id",taskId);if(r.error)toast(r.error.message);else await load()}
 });
 
 document.addEventListener("submit",async e=>{
@@ -216,7 +226,7 @@ document.addEventListener("submit",async e=>{
  if(cfg.supabaseKey.includes("PASTE_")){root.innerHTML=`<div class="wrap"><div class="card"><h2>Nolan Electric</h2><p>Supabase publishable key is missing from config.js.</p></div></div>`;return}
  sb=createClient(cfg.supabaseUrl,cfg.supabaseKey);
  const {data}=await sb.auth.getSession();session=data.session;
- if(session){const {data:p}=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();profile=p}
+ if(session){const {data:p}=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();profile=p;normalizeTab()}
  render();if(session)load();
  sb.auth.onAuthStateChange(async(_e,s)=>{session=s;if(s){const {data:p}=await sb.from("profiles").select("*").eq("id",s.user.id).maybeSingle();profile=p;normalizeTab()}else{profile=null;state.tab="dashboard"}render();if(s)load()});
 })();
