@@ -6,6 +6,15 @@ let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],
 
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
+const budgetState=(estimate,actual)=>{
+ const e=Number(estimate||0), a=Number(actual||0);
+ if(e<=0) return {label:"No budget",className:"",variance:a};
+ const ratio=a/e;
+ if(ratio>1) return {label:"Over budget",className:"over",variance:a-e};
+ if(ratio>=0.85) return {label:"Near budget",className:"near",variance:a-e};
+ return {label:"Under budget",className:"under",variance:a-e};
+};
+
 const dateFmt=v=>v?new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"—";
 const statusLabel=v=>String(v||"").replaceAll("_"," ").replace(/\b\w/g,x=>x.toUpperCase());
 function toast(msg){alert(msg)}
@@ -95,6 +104,8 @@ function financial(){
  const totalContract=jobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
  const totalEstLabor=jobs.reduce((a,j)=>a+Number(j.estimated_labor_cost||0),0);
  const totalEstMat=jobs.reduce((a,j)=>a+Number(j.estimated_material_cost||0),0);
+ const totalEstOther=jobs.reduce((a,j)=>a+Number(j.estimated_other_cost||0),0);
+ const totalEstCost=totalEstLabor+totalEstMat+totalEstOther;
  const laborByJob={};
  (state.companyTimeEntries||[]).forEach(t=>{
   const rate=Number(state.employeeRates?.[t.profile_id]||0);
@@ -105,15 +116,17 @@ function financial(){
   if(!costsByJob[c.job_id]) costsByJob[c.job_id]={material:0,other:0,total:0};
   const amt=Number(c.amount||0);
   costsByJob[c.job_id].total+=amt;
-  if(c.cost_type==='material') costsByJob[c.job_id].material+=amt; else costsByJob[c.job_id].other+=amt;
+  if(c.cost_type==="material") costsByJob[c.job_id].material+=amt; else costsByJob[c.job_id].other+=amt;
  });
  const rows=jobs.map(j=>{
   const labor=laborByJob[j.id]||0;
   const c=costsByJob[j.id]||{material:0,other:0,total:0};
   const cost=labor+c.total;
+  const est=Number(j.estimated_labor_cost||0)+Number(j.estimated_material_cost||0)+Number(j.estimated_other_cost||0);
   const profit=Number(j.contract_amount||0)-cost;
   const margin=Number(j.contract_amount||0)?profit/Number(j.contract_amount)*100:0;
-  return {j,labor,material:c.material,other:c.other,cost,profit,margin};
+  const budget=budgetState(est,cost);
+  return {j,labor,material:c.material,other:c.other,cost,est,profit,margin,budget};
  }).sort((a,b)=>b.profit-a.profit);
  const actualLabor=rows.reduce((a,r)=>a+r.labor,0);
  const actualMaterials=rows.reduce((a,r)=>a+r.material,0);
@@ -122,16 +135,19 @@ function financial(){
  const grossProfit=totalContract-actualCost;
  const margin=totalContract?grossProfit/totalContract*100:0;
  const profitable=rows.filter(r=>r.profit>=0).length;
+ const budgets=rows.reduce((a,r)=>{a[r.budget.label]=(a[r.budget.label]||0)+1;return a;},{});
  return `<div class="grid">
  <div class="card metric"><span>Contract Value</span><b>${money(totalContract)}</b></div>
- <div class="card metric"><span>Actual Labor</span><b>${money(actualLabor)}</b></div>
+ <div class="card metric"><span>Est. Total Cost</span><b>${money(totalEstCost)}</b></div>
  <div class="card metric"><span>Actual Costs</span><b>${money(actualCost)}</b></div>
  <div class="card metric"><span>Gross Profit</span><b>${money(grossProfit)}</b></div>
  <div class="card metric"><span>Gross Margin</span><b>${margin.toFixed(1)}%</b></div>
  <div class="card metric"><span>Profitable Jobs</span><b>${profitable}/${rows.length}</b></div></div>
- <div class="card" style="margin-top:14px"><div class="row"><div><h2>Job Profitability</h2><div class="sub">Actual labor + material + other costs compared with contract value.</div></div></div>
- <div class="list" style="margin-top:14px">${rows.length?rows.map(r=>`<div class="job"><div class="row"><div style="min-width:0"><b>${esc(r.j.job_number)} · ${esc(r.j.name)}</b><div class="sub">${esc(r.j.customers?.name||"No customer")} · ${statusLabel(r.j.status)}</div><div class="sub">Labor ${money(r.labor)} · Materials ${money(r.material)} · Other ${money(r.other)}</div></div><div style="text-align:right"><b>${money(r.profit)}</b><div class="sub">${r.margin.toFixed(1)}% margin</div><div class="sub">Cost ${money(r.cost)}</div></div></div></div>`).join(''):`<div class="empty">No jobs yet.</div>`}</div></div>
- <div class="card" style="margin-top:14px"><h3>Estimates vs. Actuals</h3><div class="sub">Estimated labor ${money(totalEstLabor)} · Estimated materials ${money(totalEstMat)} · Actual costs ${money(actualCost)}</div></div>`;
+ <div class="card" style="margin-top:14px"><h3>Budget Watch</h3><div class="sub">Actual cost compared with each job's estimated total cost.</div>
+ <div class="pipeline" style="margin-top:12px"><div><b>${budgets["Under budget"]||0}</b><span>Under Budget</span></div><div><b>${budgets["Near budget"]||0}</b><span>Near Budget</span></div><div><b>${budgets["Over budget"]||0}</b><span>Over Budget</span></div></div></div>
+ <div class="card" style="margin-top:14px"><h2>Job Profitability</h2><div class="sub">Actual labor + material + other costs compared with contract value.</div>
+ <div class="list" style="margin-top:14px">${rows.length?rows.map(r=>`<div class="job"><div class="row"><div style="min-width:0"><b>${esc(r.j.job_number)} · ${esc(r.j.name)}</b><div class="sub">${esc(r.j.customers?.name||"No customer")} · ${statusLabel(r.j.status)}</div><div class="sub">Labor ${money(r.labor)} · Materials ${money(r.material)} · Other ${money(r.other)}</div><div class="sub">Budget: ${r.est?money(r.est):"Not set"} · ${r.budget.label}${r.est?" · Variance "+money(r.budget.variance):""}</div></div><div style="text-align:right"><b>${money(r.profit)}</b><div class="sub">${r.margin.toFixed(1)}% margin</div><div class="sub">Cost ${money(r.cost)}</div></div></div></div>`).join(''):`<div class="empty">No jobs yet.</div>`}</div></div>
+ <div class="card" style="margin-top:14px"><h3>Estimates vs. Actuals</h3><div class="sub">Estimated labor ${money(totalEstLabor)} · Estimated materials ${money(totalEstMat)} · Estimated other ${money(totalEstOther)} · Estimated total ${money(totalEstCost)} · Actual costs ${money(actualCost)}</div></div>`;
 }
 function field(){
  return `<div class="card"><h2>My Day</h2><p>Field operations for assigned jobs.</p><div class="field-actions"><button class="btn primary" id="quickNote">ADD NOTE</button><button class="btn" id="quickMaterial">NEED MATERIAL</button><button class="btn" id="refresh">REFRESH JOBS</button></div></div>
@@ -161,15 +177,26 @@ function jobModal(j){
  const otherCosts=state.jobCosts.filter(x=>x.cost_type!=="material").reduce((a,x)=>a+Number(x.amount||0),0);
  const currentCost=actualLabor+actualMaterials+otherCosts;
  const grossProfit=Number(j.contract_amount||0)-currentCost;
+ const estimatedLaborCost=Number(j.estimated_labor_cost||0);
+ const estimatedMaterialCost=Number(j.estimated_material_cost||0);
+ const estimatedOtherCost=Number(j.estimated_other_cost||0);
+ const estimatedTotal=estimatedLaborCost+estimatedMaterialCost+estimatedOtherCost;
+ const budget=budgetState(estimatedTotal,currentCost);
  const financial=fieldUser?"":`<div class="grid">
  <div class="card metric"><span>Contract</span><b>${money(j.contract_amount)}</b></div>
- <div class="card metric"><span>Est. Labor</span><b>${Number(j.estimated_labor_hours||0)}h</b></div>
+ <div class="card metric"><span>Est. Labor</span><b>${Number(j.estimated_labor_hours||0)}h · ${money(estimatedLaborCost)}</b></div>
+ <div class="card metric"><span>Est. Materials</span><b>${money(estimatedMaterialCost)}</b></div>
+ <div class="card metric"><span>Est. Other</span><b>${money(estimatedOtherCost)}</b></div>
+ <div class="card metric"><span>Estimated Cost</span><b>${money(estimatedTotal)}</b></div>
  <div class="card metric"><span>Actual Labor</span><b>${money(actualLabor)}</b></div>
  <div class="card metric"><span>Actual Materials</span><b>${money(actualMaterials)}</b></div>
  <div class="card metric"><span>Other Costs</span><b>${money(otherCosts)}</b></div>
  <div class="card metric"><span>Current Cost</span><b>${money(currentCost)}</b></div>
+ <div class="card metric"><span>Budget Status</span><b>${budget.label}</b></div>
+ <div class="card metric"><span>Cost Variance</span><b>${estimatedTotal?money(budget.variance):"—"}</b></div>
  <div class="card metric"><span>Gross Profit</span><b>${money(grossProfit)}</b></div>
- <div class="card metric"><span>Gross Margin</span><b>${Number(j.contract_amount||0)?(grossProfit/Number(j.contract_amount)*100).toFixed(1):"0.0"}%</b></div></div>`;
+ <div class="card metric"><span>Gross Margin</span><b>${Number(j.contract_amount||0)?(grossProfit/Number(j.contract_amount)*100).toFixed(1):"0.0"}%</b></div></div>
+ <div class="row" style="margin-top:10px"><div class="sub">${estimatedTotal?`Budget: ${money(estimatedTotal)} · Actual: ${money(currentCost)} · ${budget.label}`:"Set an estimated cost budget to track variance."}</div><button class="btn" id="editEstimate">Edit Estimate</button></div>`;
  const status=fieldUser?"":`<h3>Status</h3><div class="status-buttons">${["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid"].map(s=>`<button class="pill ${j.status===s?"active":""}" data-status="${s}" data-jobstatus="${j.id}">${statusLabel(s)}</button>`).join("")}</div>`;
  const taskMarkup=tasks.map(t=>`<div class="job" style="margin-bottom:8px"><label style="display:block"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}</label><div class="sub">${t.description?esc(t.description)+" · ":""}${t.assigned_to?"Assigned to "+esc(state.profiles.find(p=>p.id===t.assigned_to)?.full_name||"team member"):"Unassigned"}</div>${fieldUser?"":`<select class="task-assignee" data-task-assignee="${t.id}" style="margin-top:7px"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}" ${t.assigned_to===p.id?"selected":""}>${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select>`}</div>`).join("")||"<div class='empty'>No tasks yet.</div>";
  const taskHeader=fieldUser?`<h3>My Tasks</h3>`:`<h3>Tasks <button id="addTask" class="btn" style="float:right">+ Task</button></h3>`;
@@ -258,6 +285,7 @@ async function openNewJob(){
  <input name="estimated_labor_hours" type="number" step=".25" placeholder="Estimated labor hours">
  <input name="estimated_labor_cost" type="number" step=".01" placeholder="Estimated labor cost">
  <input name="estimated_material_cost" type="number" step=".01" placeholder="Estimated material cost">
+ <input name="estimated_other_cost" type="number" step=".01" placeholder="Estimated other costs">
  <input name="scheduled_start" type="date">
  <textarea name="description" placeholder="Scope of work"></textarea>
  <button class="btn primary" type="submit">Create Job</button></form>`,async f=>{
@@ -266,6 +294,7 @@ async function openNewJob(){
    job_type:f.get("job_type"),status:f.get("status"),contract_amount:Number(f.get("contract_amount")||0),
    estimated_labor_hours:Number(f.get("estimated_labor_hours")||0),estimated_labor_cost:Number(f.get("estimated_labor_cost")||0),
    estimated_material_cost:Number(f.get("estimated_material_cost")||0),
+   estimated_other_cost:Number(f.get("estimated_other_cost")||0),
    scheduled_start:f.get("scheduled_start")||null,description:f.get("description")
   }).select("id").single();
   if(!r.error && r.data?.id){
@@ -293,6 +322,7 @@ document.addEventListener("click",async e=>{
  if(e.target.id==="close"){state.selected=null;render();return}
  const st=e.target.closest("[data-jobstatus]");if(st){const id=st.dataset.jobstatus,s=st.dataset.status;const r=await sb.from("jobs").update({status:s}).eq("id",id);if(r.error)toast(r.error.message);else{state.selected={...state.selected,status:s};await load()}return}
  if(e.target.id==="addTask"){if(!state.selected)return;const assignable=state.profiles.filter(p=>p.active&&p.role!=="customer");modalForm("Add Task",`<form class="form"><input name="title" placeholder="Task" required><textarea name="description" placeholder="Task details"></textarea><select name="assigned_to"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Add Task</button></form>`,async f=>sb.from("job_tasks").insert({job_id:state.selected.id,title:f.get("title"),description:f.get("description"),assigned_to:f.get("assigned_to")||null,status:"open"}));return}
+ if(e.target.id==="editEstimate"){if(!state.selected||isFieldUser())return;const j=state.selected;modalForm("Edit Estimate",`<form class="form"><input name="contract_amount" type="number" step=".01" value="${Number(j.contract_amount||0)}" placeholder="Contract / estimate amount"><input name="estimated_labor_hours" type="number" step=".25" value="${Number(j.estimated_labor_hours||0)}" placeholder="Estimated labor hours"><input name="estimated_labor_cost" type="number" step=".01" value="${Number(j.estimated_labor_cost||0)}" placeholder="Estimated labor cost"><input name="estimated_material_cost" type="number" step=".01" value="${Number(j.estimated_material_cost||0)}" placeholder="Estimated material cost"><input name="estimated_other_cost" type="number" step=".01" value="${Number(j.estimated_other_cost||0)}" placeholder="Estimated other costs"><p class="sub">Use your expected internal cost, not the customer-facing markup. This stays on the admin side.</p><button class="btn primary" type="submit">Save Estimate</button></form>`,async f=>sb.from("jobs").update({contract_amount:Number(f.get("contract_amount")||0),estimated_labor_hours:Number(f.get("estimated_labor_hours")||0),estimated_labor_cost:Number(f.get("estimated_labor_cost")||0),estimated_material_cost:Number(f.get("estimated_material_cost")||0),estimated_other_cost:Number(f.get("estimated_other_cost")||0)}).eq("id",j.id));return}
  if(e.target.id==="addCost"){if(!state.selected||isFieldUser())return;modalForm("Add Job Cost",`<form class="form"><select name="cost_type"><option value="material">Material</option><option value="permit">Permit</option><option value="equipment">Equipment Rental</option><option value="subcontractor">Subcontractor</option><option value="other">Other</option></select><input name="description" placeholder="What was purchased / spent?" required><input name="quantity" type="number" min="0.01" step="0.01" value="1" placeholder="Quantity"><input name="amount" type="number" min="0" step="0.01" placeholder="Total actual cost" required><input name="cost_date" type="date" value="${new Date().toISOString().slice(0,10)}"><button class="btn primary" type="submit">Save Cost</button></form>`,async f=>sb.from("job_costs").insert({job_id:state.selected.id,cost_type:f.get("cost_type"),description:f.get("description"),quantity:Number(f.get("quantity")||1),amount:Number(f.get("amount")||0),cost_date:f.get("cost_date"),entered_by:session.user.id}));return}
  if(e.target.id==="assignCrew"){if(!state.selected)return;const assigned=new Set(state.members.map(m=>m.profile_id));const available=state.profiles.filter(p=>p.active&&p.role!=="customer"&&!assigned.has(p.id));if(!available.length){toast("Everyone is already assigned to this job.");return}modalForm("Assign Crew",`<form class="form"><select name="profile_id">${available.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Assign to Job</button></form>`,async f=>sb.from("job_members").insert({job_id:state.selected.id,profile_id:f.get("profile_id")}));return}
  const rm=e.target.closest("[data-remove-crew]");if(rm){if(!state.selected)return;const r=await sb.from("job_members").delete().eq("job_id",state.selected.id).eq("profile_id",rm.dataset.removeCrew);if(r.error)toast(r.error.message);else await load();return}
