@@ -2,7 +2,7 @@ const { createClient } = window.supabase;
 const cfg=window.NOLAN_CONFIG;
 const root=document.getElementById("app");
 let sb=null, session=null, profile=null;
-let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],selected:null,loading:false};
+let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],selected:null,loading:false};
 
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
@@ -18,7 +18,7 @@ function appShell(){
  const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","team","financial"];
  return `<div class="top"><div class="row"><div><div class="brand">Nolan Electric</div><div class="sub">${esc(profile?.full_name||"User")} · ${esc(profile?.role||"")}</div></div><button id="logout" class="btn">Sign Out</button></div></div>
  <div class="wrap"><div class="nav">${tabs.map(t=>`<button data-tab="${t}" class="${state.tab===t?"btn primary":"btn"}">${t==="field"?"My Day":t==="team"?"Team":t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>
- ${state.tab==="dashboard"?dashboard():state.tab==="customers"?customers():state.tab==="jobs"?jobs():state.tab==="financial"?financial():field()}</div>${state.selected?jobModal(state.selected):""}`;
+ ${state.tab==="dashboard"?dashboard():state.tab==="customers"?customers():state.tab==="jobs"?jobs():state.tab==="team"?team():state.tab==="financial"?financial():field()}</div>${state.selected?jobModal(state.selected):""}`;
 }
 
 function dashboard(){
@@ -51,6 +51,34 @@ function jobs(){
  return `<div class="card"><div class="row"><div><h2>Jobs</h2><div class="sub">${state.jobs.length} total jobs</div></div><button id="newJob" class="btn primary">+ New Job</button></div>
  <div class="job-filters">${groups.map(s=>`<button class="pill ${state.jobs.some(j=>j.status===s)?"active":""}" data-filter="${s}">${statusLabel(s)} (${state.jobs.filter(j=>j.status===s).length})</button>`).join("")}</div>
  <div id="jobResults">${jobList(state.jobs)}</div></div>`;
+}
+
+function team(){
+ const active=state.profiles.filter(p=>p.active).length;
+ return `<div class="card"><div class="row"><div><h2>Team</h2><div class="sub">${active} active · ${state.profiles.length} total employees</div></div><button id="newEmployee" class="btn primary">+ Employee</button></div>
+ <div class="list" style="margin-top:14px">${state.profiles.map(p=>`<div class="job"><div class="row"><div><b>${esc(p.full_name)}</b><div class="sub">${esc(p.role||"employee")} ${p.email?"· "+esc(p.email):""}</div>${p.phone?`<div class="sub">${esc(p.phone)}</div>`:""}</div><div style="text-align:right"><span class="pill ${p.active?"active":""}">${p.active?"Active":"Inactive"}</span><button class="btn" data-employee="${p.id}" style="margin-left:6px">Manage</button></div></div></div>`).join("")||`<div class="empty">No employees yet.</div>`}</div></div>
+ <div class="card" style="margin-top:14px"><h3>Employee access</h3><p class="sub">New employees get a Nolan Electric login. The app never stores employee passwords in the database.</p></div>`;
+}
+
+function employeeForm(p){
+ const roles=["employee","crew_lead","manager","admin"];
+ modalForm(p?"Manage Employee":"Add Employee",`<form class="form">
+ <input name="full_name" value="${esc(p?.full_name||"")}" placeholder="Full name" required>
+ <input name="email" type="email" value="${esc(p?.email||"")}" placeholder="Email address" ${p?"readonly":"required"}>
+ <input name="phone" value="${esc(p?.phone||"")}" placeholder="Phone">
+ <select name="role">${roles.map(r=>`<option value="${r}" ${p?.role===r?"selected":""}>${statusLabel(r)}</option>`).join("")}</select>
+ ${p?`<label style="display:flex;align-items:center;gap:8px"><input name="active" type="checkbox" ${p.active?"checked":""}> Active employee</label>`:`<p class="sub">A temporary password will be generated for the employee. Give it to them securely, then have them change it after signing in.</p>`}
+ <button class="btn primary" type="submit">${p?"Save Changes":"Create Employee"}</button></form>`,async f=>{
+  if(p){
+   const r=await sb.functions.invoke("employee-admin",{body:{action:"update",id:p.id,full_name:f.get("full_name"),phone:f.get("phone"),role:f.get("role"),active:f.get("active")==="on"}});
+   if(!r.error && r.data?.error) return {error:new Error(r.data.error)};
+   return r;
+  }
+  const r=await sb.functions.invoke("employee-admin",{body:{action:"create",full_name:f.get("full_name"),email:f.get("email"),phone:f.get("phone"),role:f.get("role")}});
+  if(!r.error && r.data?.error) return {error:new Error(r.data.error)};
+  if(!r.error && r.data?.temporary_password) toast(`Employee created.\n\nEmail: ${r.data.email}\nTemporary password: ${r.data.temporary_password}\n\nGive this to the employee securely. They should change it after signing in.`);
+  return r;
+ });
 }
 
 function financial(){
@@ -91,6 +119,9 @@ async function load(){
   const cr=await sb.from("customers").select("id,name,company,phone,email,notes,created_at").order("name");
   if(cr.error)throw new Error("Customers could not be loaded: "+cr.error.message);
   state.customers=cr.data||[];
+  const pr=await sb.from("profiles").select("*").order("created_at");
+  if(pr.error)throw new Error("Team could not be loaded: "+pr.error.message);
+  state.profiles=pr.data||[];
   const jr=await sb.from("jobs").select("*,customers(name)").order("created_at",{ascending:false});
   if(jr.error)throw new Error("Jobs could not be loaded: "+jr.error.message);
   state.jobs=jr.data||[];
@@ -156,6 +187,8 @@ async function openNewJob(){
 document.addEventListener("click",async e=>{
  const tab=e.target.closest("[data-tab]");if(tab){state.tab=tab.dataset.tab;state.selected=null;await load();return}
  if(e.target.id==="logout"){await sb.auth.signOut();return}
+ if(e.target.id==="newEmployee"){employeeForm();return}
+ const emp=e.target.closest("[data-employee]");if(emp){const p=state.profiles.find(x=>x.id===emp.dataset.employee);if(p)employeeForm(p);return}
  if(e.target.id==="newCustomer")modalForm("New Customer",`<form class="form"><input name="name" placeholder="Customer name" required><input name="company" placeholder="Company"><input name="phone" placeholder="Phone"><input name="email" type="email" placeholder="Email"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary" type="submit">Save Customer</button></form>`,async f=>sb.from("customers").insert({name:f.get("name"),company:f.get("company"),phone:f.get("phone"),email:f.get("email"),notes:f.get("notes")}));
  if(e.target.id==="newJob")return openNewJob();
  const jb=e.target.closest("[data-job]");if(jb){state.selected=state.jobs.find(x=>x.id===jb.dataset.job);await load();return}
