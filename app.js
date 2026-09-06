@@ -2,7 +2,7 @@ const { createClient } = window.supabase;
 const cfg=window.NOLAN_CONFIG;
 const root=document.getElementById("app");
 let sb=null, session=null, profile=null;
-let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],selected:null,loading:false};
+let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],loading:false,selected:null};
 
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
@@ -103,6 +103,10 @@ function jobModal(j){
  const tasks=state.tasks.filter(t=>t.job_id===j.id);
  const members=state.members.filter(m=>m.job_id===j.id);
  const assignable=state.profiles.filter(p=>p.active && p.role!=="customer");
+ const activeTime=fieldUser?state.timeEntries.find(x=>x.profile_id===session.user.id&&!x.ended_at):null;
+ const todaySeconds=fieldUser?state.timeEntries.filter(x=>x.profile_id===session.user.id&&new Date(x.started_at).toDateString()===new Date().toDateString()).reduce((a,x)=>a+(x.duration_minutes?Number(x.duration_minutes)*60:((new Date(x.ended_at||Date.now())-new Date(x.started_at))/1000)),0):0;
+ const hoursFmt=s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return `${h}h ${String(m).padStart(2,"0")}m`};
+ const timePanel=fieldUser?`<div class="card" style="margin:12px 0"><div class="row"><div><b>Time</b><div class="sub">Today: ${hoursFmt(todaySeconds)}</div></div>${activeTime?`<button class="btn primary" id="stopJob">STOP JOB</button>`:`<div style="display:flex;gap:6px"><button class="btn" id="logHours">LOG HOURS</button><button class="btn primary" id="startJob">START JOB</button></div>`}</div>${activeTime?`<div class="sub" style="margin-top:8px">Started ${new Date(activeTime.started_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}</div>`:""}</div>`:"";
  const financial=fieldUser?"":`<div class="grid">
  <div class="card metric"><span>Contract</span><b>${money(j.contract_amount)}</b></div>
  <div class="card metric"><span>Est. Labor</span><b>${Number(j.estimated_labor_hours||0)}h</b></div>
@@ -114,6 +118,7 @@ function jobModal(j){
  const crew=fieldUser?"":`<h3>Crew <button id="assignCrew" class="btn" style="float:right">+ Assign Crew</button></h3><div class="list">${members.map(m=>`<div class="job"><div class="row"><div><b>${esc(m.profiles?.full_name||"Crew member")}</b><div class="sub">${esc(m.profiles?.role||"")}</div></div><button class="btn" data-remove-crew="${m.profile_id}">Remove</button></div></div>`).join("")||"<div class='empty'>No crew assigned yet.</div>"}</div>`;
  return `<div class="modal"><div class="sheet"><div class="row"><div><h2>${esc(j.job_number)} · ${esc(j.name)}</h2><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div></div><button class="btn" id="close">Close</button></div><hr>
  ${financial}
+ ${timePanel}
  <div class="job-detail"><b>Customer:</b> ${esc(j.customers?.name||"—")} &nbsp; <b>Type:</b> ${statusLabel(j.job_type||"—")} &nbsp; <b>Schedule:</b> ${dateFmt(j.scheduled_start)}</div>
  <p>${esc(j.description||"No scope/description entered.")}</p>
  ${status}
@@ -145,7 +150,9 @@ async function load(){
    state.tasks=tr.error?[]:(tr.data||[]);
    const mr=await sb.from("job_members").select("job_id,profile_id,profiles(full_name,role)").eq("job_id",state.selected.id);
    state.members=mr.error?[]:(mr.data||[]);
-  }else{state.tasks=[];state.members=[];}
+   const te=await sb.from("time_entries").select("*").eq("job_id",state.selected.id).order("started_at",{ascending:false});
+   state.timeEntries=te.error?[]:(te.data||[]);
+  }else{state.tasks=[];state.members=[];state.timeEntries=[];}
  }catch(err){console.error(err);toast(err?.message||"Could not load data from Supabase.")}
  state.loading=false;render();
 }
@@ -213,6 +220,9 @@ document.addEventListener("click",async e=>{
  const rm=e.target.closest("[data-remove-crew]");if(rm){if(!state.selected)return;const r=await sb.from("job_members").delete().eq("job_id",state.selected.id).eq("profile_id",rm.dataset.removeCrew);if(r.error)toast(r.error.message);else await load();return}
  if(e.target.id==="addNote"||e.target.id==="quickNote"){if(!state.selected){toast("Open a job first.");return}modalForm("Add Field Note",`<form class="form"><textarea name="message" required placeholder="What happened on the job?"></textarea><button class="btn primary" type="submit">Save Note</button></form>`,async f=>sb.from("job_activity").insert({job_id:state.selected.id,profile_id:session.user.id,event_type:"field_note",message:f.get("message")}));return}
  if(e.target.id==="addMaterial"||e.target.id==="quickMaterial"){if(!state.selected){toast("Open a job first.");return}modalForm("Material Request",`<form class="form"><input name="item" required placeholder="Material"><input name="quantity" type="number" step=".01" value="1"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary" type="submit">Request Material</button></form>`,async f=>sb.from("material_requests").insert({job_id:state.selected.id,requested_by:session.user.id,item:f.get("item"),quantity:Number(f.get("quantity")||1),notes:f.get("notes")}));return}
+ if(e.target.id==="startJob"){if(!state.selected)return;const existing=state.timeEntries.find(x=>x.profile_id===session.user.id&&!x.ended_at);if(existing){toast("You already have a job running.");return}const r=await sb.from("time_entries").insert({job_id:state.selected.id,profile_id:session.user.id,started_at:new Date().toISOString()}).select().single();if(r.error)toast(r.error.message);else await load();return}
+ if(e.target.id==="stopJob"){if(!state.selected)return;const active=state.timeEntries.find(x=>x.profile_id===session.user.id&&!x.ended_at);if(!active){toast("No active timer for this job.");return}const r=await sb.from("time_entries").update({ended_at:new Date().toISOString()}).eq("id",active.id);if(r.error)toast(r.error.message);else await load();return}
+ if(e.target.id==="logHours"){if(!state.selected)return;modalForm("Log Hours",`<form class="form"><input name="hours" type="number" min="0.01" step="0.25" placeholder="Hours worked" required><textarea name="notes" placeholder="What was completed?"></textarea><button class="btn primary" type="submit">Save Hours</button></form>`,async f=>{const hours=Number(f.get("hours")||0);const now=new Date().toISOString();return sb.from("time_entries").insert({job_id:state.selected.id,profile_id:session.user.id,started_at:now,ended_at:now,duration_minutes:Math.round(hours*60),notes:f.get("notes")})});return}
  if(e.target.id==="addPhoto"){toast("Photo storage is the next field feature.")}
  if(e.target.id==="refresh"){await load();return}
  const filter=e.target.closest("[data-filter]");if(filter){document.querySelectorAll("[data-filter]").forEach(x=>x.classList.remove("active"));filter.classList.add("active");const s=filter.dataset.filter;document.getElementById("jobResults").innerHTML=jobList(state.jobs.filter(j=>j.status===s));return}
