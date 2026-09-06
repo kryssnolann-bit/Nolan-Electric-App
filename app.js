@@ -2,7 +2,7 @@ const { createClient } = window.supabase;
 const cfg=window.NOLAN_CONFIG;
 const root=document.getElementById("app");
 let sb=null, session=null, profile=null;
-let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],employeeRates:{},loading:false,selected:null};
+let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],employeeRates:{},jobCosts:[],loading:false,selected:null};
 
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
@@ -94,8 +94,9 @@ function financial(){
  const total=state.jobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
  const estLabor=state.jobs.reduce((a,j)=>a+Number(j.estimated_labor_cost||0),0);
  const estMat=state.jobs.reduce((a,j)=>a+Number(j.estimated_material_cost||0),0);
+ const rows=state.jobs.map(j=>`<div class="job"><div class="row"><div><b>${esc(j.job_number)} · ${esc(j.name)}</b><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div></div><b>${money(j.contract_amount)}</b></div></div>`).join("");
  return `<div class="grid"><div class="card metric"><span>Contract Value</span><b>${money(total)}</b></div><div class="card metric"><span>Estimated Labor</span><b>${money(estLabor)}</b></div><div class="card metric"><span>Estimated Materials</span><b>${money(estMat)}</b></div><div class="card metric"><span>Jobs</span><b>${state.jobs.length}</b></div></div>
- <div class="card" style="margin-top:14px"><h2>Financial Center</h2><p>Job-level contract value and estimating fields are live. Actual costs, invoices, payments and gross margin will be expanded here next.</p></div>`;
+ <div class="card" style="margin-top:14px"><h2>Job Profitability</h2><p class="sub">Open a job to see actual labor, materials, other costs, gross profit and margin. Actual costs update as field time and expenses are entered.</p><div class="list">${rows||`<div class="empty">No jobs yet.</div>`}</div></div>`;
 }
 
 function field(){
@@ -122,13 +123,19 @@ function jobModal(j){
  const hoursFmt=s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return `${h}h ${String(m).padStart(2,"0")}m`};
  const timePanel=fieldUser?`<div class="card" style="margin:12px 0"><div class="row"><div><b>Time</b><div class="sub">Today: ${hoursFmt(todaySeconds)}</div></div>${activeTime?`<button class="btn primary" id="stopJob">STOP JOB</button>`:`<div style="display:flex;gap:6px"><button class="btn" id="logHours">LOG HOURS</button><button class="btn primary" id="startJob">START JOB</button></div>`}</div>${activeTime?`<div class="sub" style="margin-top:8px">Started ${new Date(activeTime.started_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}</div>`:""}</div>`:"";
  const actualLabor=actualLaborCost(state.timeEntries);
+ const actualMaterials=state.jobCosts.filter(x=>x.cost_type==="material").reduce((a,x)=>a+Number(x.amount||0),0);
+ const otherCosts=state.jobCosts.filter(x=>x.cost_type!=="material").reduce((a,x)=>a+Number(x.amount||0),0);
+ const currentCost=actualLabor+actualMaterials+otherCosts;
+ const grossProfit=Number(j.contract_amount||0)-currentCost;
  const financial=fieldUser?"":`<div class="grid">
  <div class="card metric"><span>Contract</span><b>${money(j.contract_amount)}</b></div>
  <div class="card metric"><span>Est. Labor</span><b>${Number(j.estimated_labor_hours||0)}h</b></div>
  <div class="card metric"><span>Actual Labor</span><b>${money(actualLabor)}</b></div>
- <div class="card metric"><span>Materials</span><b>${money(j.estimated_material_cost)}</b></div>
- <div class="card metric"><span>Current Cost</span><b>${money(actualLabor)}</b></div>
- <div class="card metric"><span>Gross Profit*</span><b>${money(Number(j.contract_amount||0)-actualLabor)}</b></div></div><p class="sub">*Labor only for now. Material and other actual costs will be added to job costing next.</p>`;
+ <div class="card metric"><span>Actual Materials</span><b>${money(actualMaterials)}</b></div>
+ <div class="card metric"><span>Other Costs</span><b>${money(otherCosts)}</b></div>
+ <div class="card metric"><span>Current Cost</span><b>${money(currentCost)}</b></div>
+ <div class="card metric"><span>Gross Profit</span><b>${money(grossProfit)}</b></div>
+ <div class="card metric"><span>Gross Margin</span><b>${Number(j.contract_amount||0)?(grossProfit/Number(j.contract_amount)*100).toFixed(1):"0.0"}%</b></div></div>`;
  const status=fieldUser?"":`<h3>Status</h3><div class="status-buttons">${["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid"].map(s=>`<button class="pill ${j.status===s?"active":""}" data-status="${s}" data-jobstatus="${j.id}">${statusLabel(s)}</button>`).join("")}</div>`;
  const taskMarkup=tasks.map(t=>`<div class="job" style="margin-bottom:8px"><label style="display:block"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}</label><div class="sub">${t.description?esc(t.description)+" · ":""}${t.assigned_to?"Assigned to "+esc(state.profiles.find(p=>p.id===t.assigned_to)?.full_name||"team member"):"Unassigned"}</div>${fieldUser?"":`<select class="task-assignee" data-task-assignee="${t.id}" style="margin-top:7px"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}" ${t.assigned_to===p.id?"selected":""}>${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select>`}</div>`).join("")||"<div class='empty'>No tasks yet.</div>";
  const taskHeader=fieldUser?`<h3>My Tasks</h3>`:`<h3>Tasks <button id="addTask" class="btn" style="float:right">+ Task</button></h3>`;
@@ -141,6 +148,7 @@ function jobModal(j){
  ${status}
  ${taskHeader}<div id="tasks">${taskMarkup}</div>
  ${crew}
+ ${fieldUser?"":`<h3>Actual Job Costs <button id="addCost" class="btn" style="float:right">+ Cost</button></h3><div class="list">${state.jobCosts.map(c=>`<div class="job"><div class="row"><div><b>${esc(c.description||statusLabel(c.cost_type))}</b><div class="sub">${statusLabel(c.cost_type)} · ${c.quantity?esc(c.quantity):"1"} unit${Number(c.quantity||1)===1?"":"s"}</div></div><b>${money(c.amount)}</b></div></div>`).join("")||`<div class="empty">No actual costs entered yet.</div>`}</div>`}
  <h3>Field Updates</h3><div class="field-actions"><button class="btn primary" id="addNote">ADD NOTE</button><button class="btn" id="addMaterial">NEED MATERIAL</button><button class="btn" id="addPhoto">ADD PHOTO</button></div>
  </div></div>`;
 }
@@ -175,7 +183,11 @@ async function load(){
    state.members=mr.error?[]:(mr.data||[]);
    const te=await sb.from("time_entries").select("*").eq("job_id",state.selected.id).order("started_at",{ascending:false});
    state.timeEntries=te.error?[]:(te.data||[]);
-  }else{state.tasks=[];state.members=[];state.timeEntries=[];}
+   if(!isFieldUser()){
+    const jc=await sb.from("job_costs").select("*").eq("job_id",state.selected.id).order("cost_date",{ascending:false}).order("created_at",{ascending:false});
+    state.jobCosts=jc.error?[]:(jc.data||[]);
+   }else state.jobCosts=[];
+  }else{state.tasks=[];state.members=[];state.timeEntries=[];state.jobCosts=[];}
  }catch(err){console.error(err);toast(err?.message||"Could not load data from Supabase.")}
  state.loading=false;render();
 }
@@ -239,6 +251,7 @@ document.addEventListener("click",async e=>{
  if(e.target.id==="close"){state.selected=null;render();return}
  const st=e.target.closest("[data-jobstatus]");if(st){const id=st.dataset.jobstatus,s=st.dataset.status;const r=await sb.from("jobs").update({status:s}).eq("id",id);if(r.error)toast(r.error.message);else{state.selected={...state.selected,status:s};await load()}return}
  if(e.target.id==="addTask"){if(!state.selected)return;const assignable=state.profiles.filter(p=>p.active&&p.role!=="customer");modalForm("Add Task",`<form class="form"><input name="title" placeholder="Task" required><textarea name="description" placeholder="Task details"></textarea><select name="assigned_to"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Add Task</button></form>`,async f=>sb.from("job_tasks").insert({job_id:state.selected.id,title:f.get("title"),description:f.get("description"),assigned_to:f.get("assigned_to")||null,status:"open"}));return}
+ if(e.target.id==="addCost"){if(!state.selected||isFieldUser())return;modalForm("Add Job Cost",`<form class="form"><select name="cost_type"><option value="material">Material</option><option value="permit">Permit</option><option value="equipment">Equipment Rental</option><option value="subcontractor">Subcontractor</option><option value="other">Other</option></select><input name="description" placeholder="What was purchased / spent?" required><input name="quantity" type="number" min="0.01" step="0.01" value="1" placeholder="Quantity"><input name="amount" type="number" min="0" step="0.01" placeholder="Total actual cost" required><input name="cost_date" type="date" value="${new Date().toISOString().slice(0,10)}"><button class="btn primary" type="submit">Save Cost</button></form>`,async f=>sb.from("job_costs").insert({job_id:state.selected.id,cost_type:f.get("cost_type"),description:f.get("description"),quantity:Number(f.get("quantity")||1),amount:Number(f.get("amount")||0),cost_date:f.get("cost_date"),entered_by:session.user.id}));return}
  if(e.target.id==="assignCrew"){if(!state.selected)return;const assigned=new Set(state.members.map(m=>m.profile_id));const available=state.profiles.filter(p=>p.active&&p.role!=="customer"&&!assigned.has(p.id));if(!available.length){toast("Everyone is already assigned to this job.");return}modalForm("Assign Crew",`<form class="form"><select name="profile_id">${available.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Assign to Job</button></form>`,async f=>sb.from("job_members").insert({job_id:state.selected.id,profile_id:f.get("profile_id")}));return}
  const rm=e.target.closest("[data-remove-crew]");if(rm){if(!state.selected)return;const r=await sb.from("job_members").delete().eq("job_id",state.selected.id).eq("profile_id",rm.dataset.removeCrew);if(r.error)toast(r.error.message);else await load();return}
  if(e.target.id==="addNote"||e.target.id==="quickNote"){if(!state.selected){toast("Open a job first.");return}modalForm("Add Field Note",`<form class="form"><textarea name="message" required placeholder="What happened on the job?"></textarea><button class="btn primary" type="submit">Save Note</button></form>`,async f=>sb.from("job_activity").insert({job_id:state.selected.id,profile_id:session.user.id,event_type:"field_note",message:f.get("message")}));return}
