@@ -9,12 +9,14 @@ const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).
 const dateFmt=v=>v?new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"—";
 const statusLabel=v=>String(v||"").replaceAll("_"," ").replace(/\b\w/g,x=>x.toUpperCase());
 function toast(msg){alert(msg)}
-function render(){root.innerHTML=session?appShell():login()}
+function isFieldUser(){return profile?.role==="employee"||profile?.role==="crew_lead"}
+function normalizeTab(){if(isFieldUser() && !["field","jobs"].includes(state.tab)) state.tab="field"; if(!isFieldUser() && state.tab==="field") state.tab="dashboard"}
+function render(){normalizeTab();root.innerHTML=session?appShell():login()}
 
 function login(){return `<div style="min-height:100vh;display:grid;place-items:center;padding:20px"><div class="card" style="max-width:420px;width:100%"><div class="brand">Nolan Electric</div><p>Job Command Center</p><form id="login" class="form"><input id="email" type="email" placeholder="Email" required><input id="pw" type="password" placeholder="Password" required><button class="btn primary">Sign In</button></form><p class="sub">Use the employee account created in Supabase Auth.</p></div></div>`}
 
 function appShell(){
- const isField=profile?.role==="employee"||profile?.role==="crew_lead";
+ const isField=isFieldUser();
  const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","team","financial"];
  return `<div class="top"><div class="row"><div><div class="brand">Nolan Electric</div><div class="sub">${esc(profile?.full_name||"User")} · ${esc(profile?.role||"")}</div></div><button id="logout" class="btn">Sign Out</button></div></div>
  <div class="wrap"><div class="nav">${tabs.map(t=>`<button data-tab="${t}" class="${state.tab===t?"btn primary":"btn"}">${t==="field"?"My Day":t==="team"?"Team":t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>
@@ -216,5 +218,5 @@ document.addEventListener("submit",async e=>{
  const {data}=await sb.auth.getSession();session=data.session;
  if(session){const {data:p}=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();profile=p}
  render();if(session)load();
- sb.auth.onAuthStateChange(async(_e,s)=>{session=s;if(s){const {data:p}=await sb.from("profiles").select("*").eq("id",s.user.id).maybeSingle();profile=p}else profile=null;render();if(s)load()});
+ sb.auth.onAuthStateChange(async(_e,s)=>{session=s;if(s){const {data:p}=await sb.from("profiles").select("*").eq("id",s.user.id).maybeSingle();profile=p;normalizeTab()}else{profile=null;state.tab="dashboard"}render();if(s)load()});
 })();
