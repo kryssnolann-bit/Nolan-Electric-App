@@ -182,7 +182,7 @@ function jobModal(j){
  const estimatedOtherCost=Number(j.estimated_other_cost||0);
  const estimatedTotal=estimatedLaborCost+estimatedMaterialCost+estimatedOtherCost;
  const budget=budgetState(estimatedTotal,currentCost);
- const financial=fieldUser?"":`<div class="grid">
+ const financial=fieldUser?"":`<div class="row" style="margin-bottom:10px"><h3 style="margin:0">Job Financials</h3><button class="btn primary" id="editEstimate">✏️ Edit Estimate</button></div><div class="grid">
  <div class="card metric"><span>Contract</span><b>${money(j.contract_amount)}</b></div>
  <div class="card metric"><span>Est. Labor</span><b>${Number(j.estimated_labor_hours||0)}h · ${money(estimatedLaborCost)}</b></div>
  <div class="card metric"><span>Est. Materials</span><b>${money(estimatedMaterialCost)}</b></div>
@@ -196,7 +196,7 @@ function jobModal(j){
  <div class="card metric"><span>Cost Variance</span><b>${estimatedTotal?money(budget.variance):"—"}</b></div>
  <div class="card metric"><span>Gross Profit</span><b>${money(grossProfit)}</b></div>
  <div class="card metric"><span>Gross Margin</span><b>${Number(j.contract_amount||0)?(grossProfit/Number(j.contract_amount)*100).toFixed(1):"0.0"}%</b></div></div>
- <div class="row" style="margin-top:10px"><div class="sub">${estimatedTotal?`Budget: ${money(estimatedTotal)} · Actual: ${money(currentCost)} · ${budget.label}`:"Set an estimated cost budget to track variance."}</div><button class="btn" id="editEstimate">Edit Estimate</button></div>`;
+ <div class="row" style="margin-top:10px"><div class="sub">${estimatedTotal?`Budget: ${money(estimatedTotal)} · Actual: ${money(currentCost)} · ${budget.label}`:"Set an estimated cost budget to track variance."}</div></div>`;
  const status=fieldUser?"":`<h3>Status</h3><div class="status-buttons">${["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid"].map(s=>`<button class="pill ${j.status===s?"active":""}" data-status="${s}" data-jobstatus="${j.id}">${statusLabel(s)}</button>`).join("")}</div>`;
  const taskMarkup=tasks.map(t=>`<div class="job" style="margin-bottom:8px"><label style="display:block"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}</label><div class="sub">${t.description?esc(t.description)+" · ":""}${t.assigned_to?"Assigned to "+esc(state.profiles.find(p=>p.id===t.assigned_to)?.full_name||"team member"):"Unassigned"}</div>${fieldUser?"":`<select class="task-assignee" data-task-assignee="${t.id}" style="margin-top:7px"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}" ${t.assigned_to===p.id?"selected":""}>${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select>`}</div>`).join("")||"<div class='empty'>No tasks yet.</div>";
  const taskHeader=fieldUser?`<h3>My Tasks</h3>`:`<h3>Tasks <button id="addTask" class="btn" style="float:right">+ Task</button></h3>`;
