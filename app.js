@@ -26,11 +26,11 @@ function login(){return `<div style="min-height:100vh;display:grid;place-items:c
 
 function appShell(){
  const isField=isFieldUser();
- const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","team","financial"];
+ const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","schedule","team","financial"];
  // Field users must never render an admin view, even if an old browser session left the tab set to dashboard.
- const view=isField?(state.tab==="jobs"?jobs():field()):(state.tab==="dashboard"?dashboard():state.tab==="customers"?customers():state.tab==="jobs"?jobs():state.tab==="team"?team():state.tab==="financial"?financial():dashboard());
+ const view=isField?(state.tab==="jobs"?jobs():field()):(state.tab==="dashboard"?dashboard():state.tab==="customers"?customers():state.tab==="jobs"?jobs():state.tab==="schedule"?schedule():state.tab==="team"?team():state.tab==="financial"?financial():dashboard());
  return `<div class="top"><div class="row"><div><div class="brand">Nolan Electric</div><div class="sub">${esc(profile?.full_name||"User")} · ${esc(profile?.role||"")}</div></div><button id="logout" class="btn">Sign Out</button></div></div>
- <div class="wrap"><div class="nav">${tabs.map(t=>`<button data-tab="${t}" class="${state.tab===t?"btn primary":"btn"}">${t==="field"?"My Day":t==="team"?"Team":t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>
+ <div class="wrap"><div class="nav">${tabs.map(t=>`<button data-tab="${t}" class="${state.tab===t?"btn primary":"btn"}">${t==="field"?"My Day":t==="team"?"Team":t==="schedule"?"Schedule":t[0].toUpperCase()+t.slice(1)}</button>`).join("")}</div>
  ${view}</div>${state.selected?jobModal(state.selected):""}`;
 }
 
@@ -64,6 +64,18 @@ function jobs(){
  return `<div class="card"><div class="row"><div><h2>Jobs</h2><div class="sub">${state.jobs.length} total jobs</div></div><button id="newJob" class="btn primary">+ New Job</button></div>
  <div class="job-filters">${groups.map(s=>`<button class="pill ${state.jobs.some(j=>j.status===s)?"active":""}" data-filter="${s}">${statusLabel(s)} (${state.jobs.filter(j=>j.status===s).length})</button>`).join("")}</div>
  <div id="jobResults">${jobList(state.jobs)}</div></div>`;
+}
+
+
+function schedule(){
+ const days=[]; const base=new Date(); base.setHours(0,0,0,0);
+ const start=new Date(base); start.setDate(base.getDate()-((base.getDay()+6)%7));
+ for(let i=0;i<7;i++){const d=new Date(start);d.setDate(start.getDate()+i);days.push(d);}
+ const key=d=>d.toISOString().slice(0,10), today=key(base);
+ const jobsFor=k=>state.jobs.filter(j=>j.scheduled_start&&String(j.scheduled_start).slice(0,10)===k);
+ return `<div class="card"><div class="row"><div><h2>Schedule</h2><div class="sub">This week's jobs and crew assignments.</div></div><button class="btn primary" id="scheduleNewJob">+ New Job</button></div>
+ <div class="week-grid" style="margin-top:14px">${days.map(d=>{const k=key(d),list=jobsFor(k);return `<div class="day-card ${k===today?"today":""}"><div class="row"><b>${d.toLocaleDateString("en-US",{weekday:"short"})}</b><span class="sub">${d.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span></div><div style="margin-top:8px">${list.length?list.map(j=>`<div class="schedule-job"><button class="btn" data-job="${j.id}" style="width:100%;text-align:left"><b>${esc(j.job_number)} · ${esc(j.name)}</b><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div></button></div>`).join(""):`<div class="sub">No jobs</div>`}</div></div>`}).join("")}</div>
+ <div class="card" style="margin-top:14px"><h3>Unscheduled Jobs</h3>${jobList(state.jobs.filter(j=>!j.scheduled_start),false)}</div></div>`;
 }
 
 function team(){
@@ -151,7 +163,7 @@ function financial(){
 }
 function field(){
  return `<div class="card"><h2>My Day</h2><p>Field operations for assigned jobs.</p><div class="field-actions"><button class="btn primary" id="quickNote">ADD NOTE</button><button class="btn" id="quickMaterial">NEED MATERIAL</button><button class="btn" id="refresh">REFRESH JOBS</button></div></div>
- <div class="card" style="margin-top:14px"><h2>Assigned Jobs</h2>${jobList(state.jobs,true)}</div>`;
+ <div class="card" style="margin-top:14px"><h2>Assigned Jobs</h2>${jobList([...state.jobs].sort((a,b)=>String(a.scheduled_start||"9999-99-99").localeCompare(String(b.scheduled_start||"9999-99-99"))),true)}</div>`;
 }
 
 function entryMinutes(x){
@@ -197,12 +209,13 @@ function jobModal(j){
  <div class="card metric"><span>Gross Profit</span><b>${money(grossProfit)}</b></div>
  <div class="card metric"><span>Gross Margin</span><b>${Number(j.contract_amount||0)?(grossProfit/Number(j.contract_amount)*100).toFixed(1):"0.0"}%</b></div></div>
  <div class="row" style="margin-top:10px"><div class="sub">${estimatedTotal?`Budget: ${money(estimatedTotal)} · Actual: ${money(currentCost)} · ${budget.label}`:"Set an estimated cost budget to track variance."}</div></div>`;
+ const schedulePanel=fieldUser?"":`<div class="card" style="margin:12px 0"><div class="row"><div><h3 style="margin:0">Schedule</h3><div class="sub">${j.scheduled_start?`Scheduled for ${dateFmt(j.scheduled_start)}`:"Not scheduled"}</div></div><button class="btn" id="editSchedule">Edit Schedule</button></div></div>`;
  const status=fieldUser?"":`<h3>Status</h3><div class="status-buttons">${["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid"].map(s=>`<button class="pill ${j.status===s?"active":""}" data-status="${s}" data-jobstatus="${j.id}">${statusLabel(s)}</button>`).join("")}</div>`;
  const taskMarkup=tasks.map(t=>`<div class="job" style="margin-bottom:8px"><label style="display:block"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}</label><div class="sub">${t.description?esc(t.description)+" · ":""}${t.assigned_to?"Assigned to "+esc(state.profiles.find(p=>p.id===t.assigned_to)?.full_name||"team member"):"Unassigned"}</div>${fieldUser?"":`<select class="task-assignee" data-task-assignee="${t.id}" style="margin-top:7px"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}" ${t.assigned_to===p.id?"selected":""}>${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select>`}</div>`).join("")||"<div class='empty'>No tasks yet.</div>";
  const taskHeader=fieldUser?`<h3>My Tasks</h3>`:`<h3>Tasks <button id="addTask" class="btn" style="float:right">+ Task</button></h3>`;
  const crew=fieldUser?"":`<h3>Crew <button id="assignCrew" class="btn" style="float:right">+ Assign Crew</button></h3><div class="list">${members.map(m=>`<div class="job"><div class="row"><div><b>${esc(m.profiles?.full_name||"Crew member")}</b><div class="sub">${esc(m.profiles?.role||"")}</div></div><button class="btn" data-remove-crew="${m.profile_id}">Remove</button></div></div>`).join("")||"<div class='empty'>No crew assigned yet.</div>"}</div>`;
  return `<div class="modal"><div class="sheet"><div class="row"><div><h2>${esc(j.job_number)} · ${esc(j.name)}</h2><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div></div><button class="btn" id="close">Close</button></div><hr>
- ${financial}
+ ${financial}${schedulePanel}
  ${timePanel}
  <div class="job-detail"><b>Customer:</b> ${esc(j.customers?.name||"—")} &nbsp; <b>Type:</b> ${statusLabel(j.job_type||"—")} &nbsp; <b>Schedule:</b> ${dateFmt(j.scheduled_start)}</div>
  <p>${esc(j.description||"No scope/description entered.")}</p>
@@ -322,6 +335,7 @@ document.addEventListener("click",async e=>{
  if(e.target.id==="close"){state.selected=null;render();return}
  const st=e.target.closest("[data-jobstatus]");if(st){const id=st.dataset.jobstatus,s=st.dataset.status;const r=await sb.from("jobs").update({status:s}).eq("id",id);if(r.error)toast(r.error.message);else{state.selected={...state.selected,status:s};await load()}return}
  if(e.target.id==="addTask"){if(!state.selected)return;const assignable=state.profiles.filter(p=>p.active&&p.role!=="customer");modalForm("Add Task",`<form class="form"><input name="title" placeholder="Task" required><textarea name="description" placeholder="Task details"></textarea><select name="assigned_to"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Add Task</button></form>`,async f=>sb.from("job_tasks").insert({job_id:state.selected.id,title:f.get("title"),description:f.get("description"),assigned_to:f.get("assigned_to")||null,status:"open"}));return}
+ if(e.target.id==="editSchedule"){if(!state.selected||isFieldUser())return;const j=state.selected;modalForm("Schedule Job",`<form class="form"><input name="scheduled_start" type="date" value="${j.scheduled_start?String(j.scheduled_start).slice(0,10):""}" required><select name="status"><option value="approved" ${j.status==="approved"?"selected":""}>Approved</option><option value="scheduled" ${j.status==="scheduled"?"selected":""}>Scheduled</option><option value="in_progress" ${j.status==="in_progress"?"selected":""}>In Progress</option></select><p class="sub">Choose the work date. Crew assignments stay attached to the job.</p><button class="btn primary" type="submit">Save Schedule</button></form>`,async f=>sb.from("jobs").update({scheduled_start:f.get("scheduled_start")||null,status:f.get("status")||j.status}).eq("id",j.id));return}
  if(e.target.id==="editEstimate"){if(!state.selected||isFieldUser())return;const j=state.selected;modalForm("Edit Estimate",`<form class="form"><input name="contract_amount" type="number" step=".01" value="${Number(j.contract_amount||0)}" placeholder="Contract / estimate amount"><input name="estimated_labor_hours" type="number" step=".25" value="${Number(j.estimated_labor_hours||0)}" placeholder="Estimated labor hours"><input name="estimated_labor_cost" type="number" step=".01" value="${Number(j.estimated_labor_cost||0)}" placeholder="Estimated labor cost"><input name="estimated_material_cost" type="number" step=".01" value="${Number(j.estimated_material_cost||0)}" placeholder="Estimated material cost"><input name="estimated_other_cost" type="number" step=".01" value="${Number(j.estimated_other_cost||0)}" placeholder="Estimated other costs"><p class="sub">Use your expected internal cost, not the customer-facing markup. This stays on the admin side.</p><button class="btn primary" type="submit">Save Estimate</button></form>`,async f=>sb.from("jobs").update({contract_amount:Number(f.get("contract_amount")||0),estimated_labor_hours:Number(f.get("estimated_labor_hours")||0),estimated_labor_cost:Number(f.get("estimated_labor_cost")||0),estimated_material_cost:Number(f.get("estimated_material_cost")||0),estimated_other_cost:Number(f.get("estimated_other_cost")||0)}).eq("id",j.id));return}
  if(e.target.id==="addCost"){if(!state.selected||isFieldUser())return;modalForm("Add Job Cost",`<form class="form"><select name="cost_type"><option value="material">Material</option><option value="permit">Permit</option><option value="equipment">Equipment Rental</option><option value="subcontractor">Subcontractor</option><option value="other">Other</option></select><input name="description" placeholder="What was purchased / spent?" required><input name="quantity" type="number" min="0.01" step="0.01" value="1" placeholder="Quantity"><input name="amount" type="number" min="0" step="0.01" placeholder="Total actual cost" required><input name="cost_date" type="date" value="${new Date().toISOString().slice(0,10)}"><button class="btn primary" type="submit">Save Cost</button></form>`,async f=>sb.from("job_costs").insert({job_id:state.selected.id,cost_type:f.get("cost_type"),description:f.get("description"),quantity:Number(f.get("quantity")||1),amount:Number(f.get("amount")||0),cost_date:f.get("cost_date"),entered_by:session.user.id}));return}
  if(e.target.id==="assignCrew"){if(!state.selected)return;const assigned=new Set(state.members.map(m=>m.profile_id));const available=state.profiles.filter(p=>p.active&&p.role!=="customer"&&!assigned.has(p.id));if(!available.length){toast("Everyone is already assigned to this job.");return}modalForm("Assign Crew",`<form class="form"><select name="profile_id">${available.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Assign to Job</button></form>`,async f=>sb.from("job_members").insert({job_id:state.selected.id,profile_id:f.get("profile_id")}));return}
