@@ -8,11 +8,11 @@ const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&
 const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
 const budgetState=(estimate,actual)=>{
  const e=Number(estimate||0), a=Number(actual||0);
- if(e<=0) return {label:"No budget",className:"",variance:a};
- const ratio=a/e;
- if(ratio>1) return {label:"Over budget",className:"over",variance:a-e};
- if(ratio>=0.85) return {label:"Near budget",className:"near",variance:a-e};
- return {label:"Under budget",className:"under",variance:a-e};
+ if(e<=0) return {label:"No budget",className:"",variance:a,pct:null};
+ const variance=a-e, pct=variance/e*100;
+ if(pct>10) return {label:"Over Budget",className:"over",variance,pct};
+ if(pct>5) return {label:"Watch",className:"near",variance,pct};
+ return {label:"On Budget",className:"under",variance,pct};
 };
 
 const dateFmt=v=>v?new Date(v).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"}):"—";
@@ -156,9 +156,9 @@ function financial(){
  <div class="card metric"><span>Gross Margin</span><b>${margin.toFixed(1)}%</b></div>
  <div class="card metric"><span>Profitable Jobs</span><b>${profitable}/${rows.length}</b></div></div>
  <div class="card" style="margin-top:14px"><h3>Budget Watch</h3><div class="sub">Actual cost compared with each job's estimated total cost.</div>
- <div class="pipeline" style="margin-top:12px"><div><b>${budgets["Under budget"]||0}</b><span>Under Budget</span></div><div><b>${budgets["Near budget"]||0}</b><span>Near Budget</span></div><div><b>${budgets["Over budget"]||0}</b><span>Over Budget</span></div></div></div>
+ <div class="pipeline" style="margin-top:12px"><div><b>${budgets["On Budget"]||0}</b><span>On Budget</span></div><div><b>${budgets["Watch"]||0}</b><span>Watch</span></div><div><b>${budgets["Over budget"]||0}</b><span>Over Budget</span></div></div></div>
  <div class="card" style="margin-top:14px"><h2>Job Profitability</h2><div class="sub">Actual labor + material + other costs compared with contract value.</div>
- <div class="list" style="margin-top:14px">${rows.length?rows.map(r=>`<div class="job"><div class="row"><div style="min-width:0"><b>${esc(r.j.job_number)} · ${esc(r.j.name)}</b><div class="sub">${esc(r.j.customers?.name||"No customer")} · ${statusLabel(r.j.status)}</div><div class="sub">Labor ${money(r.labor)} · Materials ${money(r.material)} · Other ${money(r.other)}</div><div class="sub">Budget: ${r.est?money(r.est):"Not set"} · ${r.budget.label}${r.est?" · Variance "+money(r.budget.variance):""}</div></div><div style="text-align:right"><b>${money(r.profit)}</b><div class="sub">${r.margin.toFixed(1)}% margin</div><div class="sub">Cost ${money(r.cost)}</div></div></div></div>`).join(''):`<div class="empty">No jobs yet.</div>`}</div></div>
+ <div class="list" style="margin-top:14px">${rows.length?rows.map(r=>`<div class="job"><div class="row"><div style="min-width:0"><b>${esc(r.j.job_number)} · ${esc(r.j.name)}</b><div class="sub">${esc(r.j.customers?.name||"No customer")} · ${statusLabel(r.j.status)}</div><div class="sub">Labor ${money(r.labor)} · Materials ${money(r.material)} · Other ${money(r.other)}</div><div class="sub">Budget: ${r.est?money(r.est):"Not set"} · ${r.budget.label}${r.est?" · Variance "+money(r.budget.variance):""}</div><div class="sub">Est. Profit ${r.est?money(Number(r.j.contract_amount||0)-r.est):"—"} · Est. Margin ${r.est&&Number(r.j.contract_amount||0)?((Number(r.j.contract_amount||0)-r.est)/Number(r.j.contract_amount)*100).toFixed(1)+"%":"—"}</div></div><div style="text-align:right"><b>${money(r.profit)}</b><div class="sub">${r.margin.toFixed(1)}% margin</div><div class="sub">Cost ${money(r.cost)}</div></div></div></div>`).join(''):`<div class="empty">No jobs yet.</div>`}</div></div>
  <div class="card" style="margin-top:14px"><h3>Estimates vs. Actuals</h3><div class="sub">Estimated labor ${money(totalEstLabor)} · Estimated materials ${money(totalEstMat)} · Estimated other ${money(totalEstOther)} · Estimated total ${money(totalEstCost)} · Actual costs ${money(actualCost)}</div></div>`;
 }
 function field(){
