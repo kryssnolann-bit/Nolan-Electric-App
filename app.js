@@ -26,10 +26,22 @@ function jobModal(j){return `<div class="modal"><div class="sheet"><div class="r
 
 async function load(){
  state.loading=true;
- const {data:c}=await sb.from("customers").select("*").order("name");
- const {data:j}=await sb.from("jobs").select("*,customers(name)").order("created_at",{ascending:false});
- state.customers=c||[];state.jobs=j||[];
- if(state.selected){const {data:t}=await sb.from("job_tasks").select("*").eq("job_id",state.selected.id).order("created_at");state.tasks=t||[]}
+ try{
+   const cr=await sb.from("customers").select("id,name,company,phone,email,notes,created_at").order("name");
+   const jr=await sb.from("jobs").select("*,customers(name)").order("created_at",{ascending:false});
+   if(cr.error) throw new Error("Customers could not be loaded: "+cr.error.message);
+   if(jr.error) throw new Error("Jobs could not be loaded: "+jr.error.message);
+   state.customers=cr.data||[];
+   state.jobs=jr.data||[];
+   if(state.selected){
+     const tr=await sb.from("job_tasks").select("*").eq("job_id",state.selected.id).order("created_at");
+     if(tr.error) throw new Error("Tasks could not be loaded: "+tr.error.message);
+     state.tasks=tr.data||[];
+   }
+ }catch(err){
+   console.error(err);
+   toast(err?.message||"Could not load data from Supabase.");
+ }
  state.loading=false;render();
 }
 function modalForm(title,body,onSubmit){
@@ -58,7 +70,15 @@ function modalForm(title,body,onSubmit){
 document.addEventListener("click",async e=>{
  const tab=e.target.closest("[data-tab]"); if(tab){state.tab=tab.dataset.tab;state.selected=null;await load();return}
  if(e.target.id==="logout"){await sb.auth.signOut();return}
- if(e.target.id==="newCustomer") modalForm("New Customer",`<form class="form"><input name="name" placeholder="Customer name" required><input name="company" placeholder="Company"><input name="phone" placeholder="Phone"><input name="email" type="email" placeholder="Email"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary">Save Customer</button></form>`,async f=>{return await sb.from("customers").insert({name:f.get("name"),company:f.get("company"),phone:f.get("phone"),email:f.get("email"),notes:f.get("notes")})});
+ if(e.target.id==="newCustomer") modalForm("New Customer",`<form class="form"><input name="name" placeholder="Customer name" required><input name="company" placeholder="Company"><input name="phone" placeholder="Phone"><input name="email" type="email" placeholder="Email"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary">Save Customer</button></form>`,async f=>{
+   const r=await sb.from("customers").insert({
+     name:f.get("name"),company:f.get("company"),phone:f.get("phone"),
+     email:f.get("email"),notes:f.get("notes")
+   }).select("id,name,company,phone,email,notes,created_at").single();
+   if(r.error) return r;
+   if(r.data) state.customers=[r.data,...state.customers].sort((a,b)=>String(a.name||"").localeCompare(String(b.name||"")));
+   return r;
+ });
  if(e.target.id==="newJob") modalForm("New Job",`<form class="form"><input name="job_number" placeholder="Job # (e.g. 2026-001)" required><input name="name" placeholder="Job name" required><select name="customer_id">${state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select><select name="status"><option>lead</option><option selected>estimate</option><option>approved</option><option>scheduled</option></select><input name="contract_amount" type="number" step=".01" placeholder="Contract amount"><textarea name="description" placeholder="Scope / description"></textarea><button class="btn primary">Create Job</button></form>`,async f=>{return await sb.from("jobs").insert({job_number:f.get("job_number"),name:f.get("name"),customer_id:f.get("customer_id")||null,status:f.get("status"),contract_amount:Number(f.get("contract_amount")||0),description:f.get("description")})});
  const jb=e.target.closest("[data-job]"); if(jb){state.selected=state.jobs.find(x=>x.id===jb.dataset.job);await load();return}
  if(e.target.id==="close"){state.selected=null;render()}
