@@ -38,10 +38,10 @@ function dashboard(){
  <h3>Recent Jobs</h3>${jobList(active.slice(0,8))}</div>`;
 }
 
-function jobList(list){
+function jobList(list,fieldMode=false){
  return `<div class="list">${list.length?list.map(j=>`<div class="job">
  <div class="row"><div style="min-width:0"><b>${esc(j.job_number)} · ${esc(j.name)}</b><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div>
- <div class="sub">${j.scheduled_start?`Scheduled ${dateFmt(j.scheduled_start)}`:"Not scheduled"}${j.contract_amount!=null?" · "+money(j.contract_amount):""}</div></div><button class="btn" data-job="${j.id}">Open</button></div>
+ <div class="sub">${j.scheduled_start?`Scheduled ${dateFmt(j.scheduled_start)}`:"Not scheduled"}${!fieldMode && j.contract_amount!=null?" · "+money(j.contract_amount):""}</div></div><button class="btn" data-job="${j.id}">Open</button></div>
  </div>`).join(""):`<div class="empty">No jobs yet.</div>`}</div>`;
 }
 
@@ -95,25 +95,30 @@ function financial(){
 
 function field(){
  return `<div class="card"><h2>My Day</h2><p>Field operations for assigned jobs.</p><div class="field-actions"><button class="btn primary" id="quickNote">ADD NOTE</button><button class="btn" id="quickMaterial">NEED MATERIAL</button><button class="btn" id="refresh">REFRESH JOBS</button></div></div>
- <div class="card" style="margin-top:14px"><h2>Assigned Jobs</h2>${jobList(state.jobs)}</div>`;
+ <div class="card" style="margin-top:14px"><h2>Assigned Jobs</h2>${jobList(state.jobs,true)}</div>`;
 }
 
 function jobModal(j){
+ const fieldUser=isFieldUser();
  const tasks=state.tasks.filter(t=>t.job_id===j.id);
  const members=state.members.filter(m=>m.job_id===j.id);
  const assignable=state.profiles.filter(p=>p.active && p.role!=="customer");
- return `<div class="modal"><div class="sheet"><div class="row"><div><h2>${esc(j.job_number)} · ${esc(j.name)}</h2><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div></div><button class="btn" id="close">Close</button></div><hr>
- <div class="grid">
+ const financial=fieldUser?"":`<div class="grid">
  <div class="card metric"><span>Contract</span><b>${money(j.contract_amount)}</b></div>
  <div class="card metric"><span>Est. Labor</span><b>${Number(j.estimated_labor_hours||0)}h</b></div>
  <div class="card metric"><span>Labor Cost</span><b>${money(j.estimated_labor_cost)}</b></div>
- <div class="card metric"><span>Materials</span><b>${money(j.estimated_material_cost)}</b></div></div>
+ <div class="card metric"><span>Materials</span><b>${money(j.estimated_material_cost)}</b></div></div>`;
+ const status=fieldUser?"":`<h3>Status</h3><div class="status-buttons">${["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid"].map(s=>`<button class="pill ${j.status===s?"active":""}" data-status="${s}" data-jobstatus="${j.id}">${statusLabel(s)}</button>`).join("")}</div>`;
+ const taskMarkup=tasks.map(t=>`<div class="job" style="margin-bottom:8px"><label style="display:block"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}</label><div class="sub">${t.description?esc(t.description)+" · ":""}${t.assigned_to?"Assigned to "+esc(state.profiles.find(p=>p.id===t.assigned_to)?.full_name||"team member"):"Unassigned"}</div>${fieldUser?"":`<select class="task-assignee" data-task-assignee="${t.id}" style="margin-top:7px"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}" ${t.assigned_to===p.id?"selected":""}>${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select>`}</div>`).join("")||"<div class='empty'>No tasks yet.</div>";
+ const taskHeader=fieldUser?`<h3>My Tasks</h3>`:`<h3>Tasks <button id="addTask" class="btn" style="float:right">+ Task</button></h3>`;
+ const crew=fieldUser?"":`<h3>Crew <button id="assignCrew" class="btn" style="float:right">+ Assign Crew</button></h3><div class="list">${members.map(m=>`<div class="job"><div class="row"><div><b>${esc(m.profiles?.full_name||"Crew member")}</b><div class="sub">${esc(m.profiles?.role||"")}</div></div><button class="btn" data-remove-crew="${m.profile_id}">Remove</button></div></div>`).join("")||"<div class='empty'>No crew assigned yet.</div>"}</div>`;
+ return `<div class="modal"><div class="sheet"><div class="row"><div><h2>${esc(j.job_number)} · ${esc(j.name)}</h2><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div></div><button class="btn" id="close">Close</button></div><hr>
+ ${financial}
  <div class="job-detail"><b>Customer:</b> ${esc(j.customers?.name||"—")} &nbsp; <b>Type:</b> ${statusLabel(j.job_type||"—")} &nbsp; <b>Schedule:</b> ${dateFmt(j.scheduled_start)}</div>
  <p>${esc(j.description||"No scope/description entered.")}</p>
- <h3>Status</h3><div class="status-buttons">${["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid"].map(s=>`<button class="pill ${j.status===s?"active":""}" data-status="${s}" data-jobstatus="${j.id}">${statusLabel(s)}</button>`).join("")}</div>
- <h3>Tasks <button id="addTask" class="btn" style="float:right">+ Task</button></h3>
- <div id="tasks">${tasks.map(t=>`<div class="job" style="margin-bottom:8px"><label style="display:block"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}</label><div class="sub">${t.description?esc(t.description)+" · ":""}${t.assigned_to?"Assigned to "+esc(state.profiles.find(p=>p.id===t.assigned_to)?.full_name||"team member"):"Unassigned"}</div><select class="task-assignee" data-task-assignee="${t.id}" style="margin-top:7px"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}" ${t.assigned_to===p.id?"selected":""}>${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select></div>`).join("")||"<div class='empty'>No tasks yet. Add the first task.</div>"}</div>
- <h3>Crew <button id="assignCrew" class="btn" style="float:right">+ Assign Crew</button></h3><div class="list">${members.map(m=>`<div class="job"><div class="row"><div><b>${esc(m.profiles?.full_name||"Crew member")}</b><div class="sub">${esc(m.profiles?.role||"")}</div></div><button class="btn" data-remove-crew="${m.profile_id}">Remove</button></div></div>`).join("")||"<div class='empty'>No crew assigned yet.</div>"}</div>
+ ${status}
+ ${taskHeader}<div id="tasks">${taskMarkup}</div>
+ ${crew}
  <h3>Field Updates</h3><div class="field-actions"><button class="btn primary" id="addNote">ADD NOTE</button><button class="btn" id="addMaterial">NEED MATERIAL</button><button class="btn" id="addPhoto">ADD PHOTO</button></div>
  </div></div>`;
 }
