@@ -2,7 +2,7 @@ const { createClient } = window.supabase;
 const cfg=window.NOLAN_CONFIG;
 const root=document.getElementById("app");
 let sb=null, session=null, profile=null;
-let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],employeeRates:{},jobCosts:[],loading:false,selected:null};
+let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],employeeRates:{},jobCosts:[],companyTimeEntries:[],companyJobCosts:[],loading:false,selected:null};
 
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
@@ -91,14 +91,48 @@ function employeeForm(p){
 }
 
 function financial(){
- const total=state.jobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
- const estLabor=state.jobs.reduce((a,j)=>a+Number(j.estimated_labor_cost||0),0);
- const estMat=state.jobs.reduce((a,j)=>a+Number(j.estimated_material_cost||0),0);
- const rows=state.jobs.map(j=>`<div class="job"><div class="row"><div><b>${esc(j.job_number)} · ${esc(j.name)}</b><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div></div><b>${money(j.contract_amount)}</b></div></div>`).join("");
- return `<div class="grid"><div class="card metric"><span>Contract Value</span><b>${money(total)}</b></div><div class="card metric"><span>Estimated Labor</span><b>${money(estLabor)}</b></div><div class="card metric"><span>Estimated Materials</span><b>${money(estMat)}</b></div><div class="card metric"><span>Jobs</span><b>${state.jobs.length}</b></div></div>
- <div class="card" style="margin-top:14px"><h2>Job Profitability</h2><p class="sub">Open a job to see actual labor, materials, other costs, gross profit and margin. Actual costs update as field time and expenses are entered.</p><div class="list">${rows||`<div class="empty">No jobs yet.</div>`}</div></div>`;
+ const jobs=state.jobs;
+ const totalContract=jobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
+ const totalEstLabor=jobs.reduce((a,j)=>a+Number(j.estimated_labor_cost||0),0);
+ const totalEstMat=jobs.reduce((a,j)=>a+Number(j.estimated_material_cost||0),0);
+ const laborByJob={};
+ (state.companyTimeEntries||[]).forEach(t=>{
+  const rate=Number(state.employeeRates?.[t.profile_id]||0);
+  laborByJob[t.job_id]=(laborByJob[t.job_id]||0)+(Number(t.duration_minutes||0)/60)*rate;
+ });
+ const costsByJob={};
+ (state.companyJobCosts||[]).forEach(c=>{
+  if(!costsByJob[c.job_id]) costsByJob[c.job_id]={material:0,other:0,total:0};
+  const amt=Number(c.amount||0);
+  costsByJob[c.job_id].total+=amt;
+  if(c.cost_type==='material') costsByJob[c.job_id].material+=amt; else costsByJob[c.job_id].other+=amt;
+ });
+ const rows=jobs.map(j=>{
+  const labor=laborByJob[j.id]||0;
+  const c=costsByJob[j.id]||{material:0,other:0,total:0};
+  const cost=labor+c.total;
+  const profit=Number(j.contract_amount||0)-cost;
+  const margin=Number(j.contract_amount||0)?profit/Number(j.contract_amount)*100:0;
+  return {j,labor,material:c.material,other:c.other,cost,profit,margin};
+ }).sort((a,b)=>b.profit-a.profit);
+ const actualLabor=rows.reduce((a,r)=>a+r.labor,0);
+ const actualMaterials=rows.reduce((a,r)=>a+r.material,0);
+ const actualOther=rows.reduce((a,r)=>a+r.other,0);
+ const actualCost=actualLabor+actualMaterials+actualOther;
+ const grossProfit=totalContract-actualCost;
+ const margin=totalContract?grossProfit/totalContract*100:0;
+ const profitable=rows.filter(r=>r.profit>=0).length;
+ return `<div class="grid">
+ <div class="card metric"><span>Contract Value</span><b>${money(totalContract)}</b></div>
+ <div class="card metric"><span>Actual Labor</span><b>${money(actualLabor)}</b></div>
+ <div class="card metric"><span>Actual Costs</span><b>${money(actualCost)}</b></div>
+ <div class="card metric"><span>Gross Profit</span><b>${money(grossProfit)}</b></div>
+ <div class="card metric"><span>Gross Margin</span><b>${margin.toFixed(1)}%</b></div>
+ <div class="card metric"><span>Profitable Jobs</span><b>${profitable}/${rows.length}</b></div></div>
+ <div class="card" style="margin-top:14px"><div class="row"><div><h2>Job Profitability</h2><div class="sub">Actual labor + material + other costs compared with contract value.</div></div></div>
+ <div class="list" style="margin-top:14px">${rows.length?rows.map(r=>`<div class="job"><div class="row"><div style="min-width:0"><b>${esc(r.j.job_number)} · ${esc(r.j.name)}</b><div class="sub">${esc(r.j.customers?.name||"No customer")} · ${statusLabel(r.j.status)}</div><div class="sub">Labor ${money(r.labor)} · Materials ${money(r.material)} · Other ${money(r.other)}</div></div><div style="text-align:right"><b>${money(r.profit)}</b><div class="sub">${r.margin.toFixed(1)}% margin</div><div class="sub">Cost ${money(r.cost)}</div></div></div></div>`).join(''):`<div class="empty">No jobs yet.</div>`}</div></div>
+ <div class="card" style="margin-top:14px"><h3>Estimates vs. Actuals</h3><div class="sub">Estimated labor ${money(totalEstLabor)} · Estimated materials ${money(totalEstMat)} · Actual costs ${money(actualCost)}</div></div>`;
 }
-
 function field(){
  return `<div class="card"><h2>My Day</h2><p>Field operations for assigned jobs.</p><div class="field-actions"><button class="btn primary" id="quickNote">ADD NOTE</button><button class="btn" id="quickMaterial">NEED MATERIAL</button><button class="btn" id="refresh">REFRESH JOBS</button></div></div>
  <div class="card" style="margin-top:14px"><h2>Assigned Jobs</h2>${jobList(state.jobs,true)}</div>`;
@@ -167,6 +201,14 @@ async function load(){
    if(er.error)throw new Error("Labor rates could not be loaded: "+er.error.message);
    (er.data||[]).forEach(x=>state.employeeRates[x.profile_id]=Number(x.labor_cost_rate||0));
   }
+  if(!isFieldUser()){
+   const ct=await sb.from("time_entries").select("job_id,profile_id,duration_minutes");
+   if(ct.error)throw new Error("Company time could not be loaded: "+ct.error.message);
+   state.companyTimeEntries=ct.data||[];
+   const cc=await sb.from("job_costs").select("job_id,cost_type,amount");
+   if(cc.error)throw new Error("Company costs could not be loaded: "+cc.error.message);
+   state.companyJobCosts=cc.data||[];
+  }else{state.companyTimeEntries=[];state.companyJobCosts=[];}
   const jr=await sb.from("jobs").select("*,customers(name)").order("created_at",{ascending:false});
   if(jr.error)throw new Error("Jobs could not be loaded: "+jr.error.message);
   const allJobs=jr.data||[];
