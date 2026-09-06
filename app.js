@@ -26,24 +26,45 @@ function jobModal(j){return `<div class="modal"><div class="sheet"><div class="r
 
 async function load(){
  state.loading=true;
+ render();
  try{
-   const cr=await sb.from("customers").select("id,name,company,phone,email,notes,created_at").order("name");
-   const jr=await sb.from("jobs").select("*,customers(name)").order("created_at",{ascending:false});
+   const cr=await sb.from("customers")
+     .select("id,name,company,phone,email,notes,created_at")
+     .order("name");
    if(cr.error) throw new Error("Customers could not be loaded: "+cr.error.message);
-   if(jr.error) throw new Error("Jobs could not be loaded: "+jr.error.message);
    state.customers=cr.data||[];
-   state.jobs=jr.data||[];
+   render();
+
+   const jr=await sb.from("jobs")
+     .select("*,customers(name)")
+     .order("created_at",{ascending:false});
+   if(jr.error){
+     console.error("Jobs load error:",jr.error);
+     state.jobs=[];
+   }else{
+     state.jobs=jr.data||[];
+   }
+
    if(state.selected){
-     const tr=await sb.from("job_tasks").select("*").eq("job_id",state.selected.id).order("created_at");
-     if(tr.error) throw new Error("Tasks could not be loaded: "+tr.error.message);
-     state.tasks=tr.data||[];
+     const tr=await sb.from("job_tasks")
+       .select("*")
+       .eq("job_id",state.selected.id)
+       .order("created_at");
+     if(tr.error){
+       console.error("Tasks load error:",tr.error);
+       state.tasks=[];
+     }else{
+       state.tasks=tr.data||[];
+     }
    }
  }catch(err){
    console.error(err);
    toast(err?.message||"Could not load data from Supabase.");
  }
- state.loading=false;render();
+ state.loading=false;
+ render();
 }
+
 function modalForm(title,body,onSubmit){
  const wrap=document.createElement("div");wrap.className="modal";
  wrap.innerHTML=`<div class="sheet"><div class="row"><h2>${title}</h2><button class="btn" id="x">Close</button></div>${body}</div>`;
