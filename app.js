@@ -32,16 +32,38 @@ async function load(){
  if(state.selected){const {data:t}=await sb.from("job_tasks").select("*").eq("job_id",state.selected.id).order("created_at");state.tasks=t||[]}
  state.loading=false;render();
 }
-function modalForm(title,body,onSubmit){const wrap=document.createElement("div");wrap.className="modal";wrap.innerHTML=`<div class="sheet"><div class="row"><h2>${title}</h2><button class="btn" id="x">Close</button></div>${body}</div>`;document.body.appendChild(wrap);wrap.querySelector("#x").onclick=()=>wrap.remove();wrap.querySelector("form").onsubmit=async e=>{e.preventDefault();await onSubmit(new FormData(e.target));wrap.remove();await load();}}
+function modalForm(title,body,onSubmit){
+ const wrap=document.createElement("div");wrap.className="modal";
+ wrap.innerHTML=`<div class="sheet"><div class="row"><h2>${title}</h2><button class="btn" id="x">Close</button></div>${body}</div>`;
+ document.body.appendChild(wrap);
+ wrap.querySelector("#x").onclick=()=>wrap.remove();
+ wrap.querySelector("form").onsubmit=async e=>{
+   e.preventDefault();
+   const form=e.target;
+   const button=form.querySelector("button[type=submit],button:last-child");
+   if(button){button.disabled=true;button.textContent="Saving...";}
+   try{
+     const result=await onSubmit(new FormData(form));
+     if(result && result.error) throw result.error;
+     wrap.remove();
+     await load();
+     toast("Saved successfully.");
+   }catch(err){
+     console.error(err);
+     toast(err?.message||"Could not save. Please try again.");
+     if(button){button.disabled=false;button.textContent=button.dataset.original||"Save";}
+   }
+ };
+}
 document.addEventListener("click",async e=>{
  const tab=e.target.closest("[data-tab]"); if(tab){state.tab=tab.dataset.tab;state.selected=null;await load();return}
  if(e.target.id==="logout"){await sb.auth.signOut();return}
- if(e.target.id==="newCustomer") modalForm("New Customer",`<form class="form"><input name="name" placeholder="Customer name" required><input name="company" placeholder="Company"><input name="phone" placeholder="Phone"><input name="email" type="email" placeholder="Email"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary">Save Customer</button></form>`,async f=>{await sb.from("customers").insert({name:f.get("name"),company:f.get("company"),phone:f.get("phone"),email:f.get("email"),notes:f.get("notes")})});
- if(e.target.id==="newJob") modalForm("New Job",`<form class="form"><input name="job_number" placeholder="Job # (e.g. 2026-001)" required><input name="name" placeholder="Job name" required><select name="customer_id">${state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select><select name="status"><option>lead</option><option selected>estimate</option><option>approved</option><option>scheduled</option></select><input name="contract_amount" type="number" step=".01" placeholder="Contract amount"><textarea name="description" placeholder="Scope / description"></textarea><button class="btn primary">Create Job</button></form>`,async f=>{await sb.from("jobs").insert({job_number:f.get("job_number"),name:f.get("name"),customer_id:f.get("customer_id")||null,status:f.get("status"),contract_amount:Number(f.get("contract_amount")||0),description:f.get("description")})});
+ if(e.target.id==="newCustomer") modalForm("New Customer",`<form class="form"><input name="name" placeholder="Customer name" required><input name="company" placeholder="Company"><input name="phone" placeholder="Phone"><input name="email" type="email" placeholder="Email"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary">Save Customer</button></form>`,async f=>{return await sb.from("customers").insert({name:f.get("name"),company:f.get("company"),phone:f.get("phone"),email:f.get("email"),notes:f.get("notes")})});
+ if(e.target.id==="newJob") modalForm("New Job",`<form class="form"><input name="job_number" placeholder="Job # (e.g. 2026-001)" required><input name="name" placeholder="Job name" required><select name="customer_id">${state.customers.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select><select name="status"><option>lead</option><option selected>estimate</option><option>approved</option><option>scheduled</option></select><input name="contract_amount" type="number" step=".01" placeholder="Contract amount"><textarea name="description" placeholder="Scope / description"></textarea><button class="btn primary">Create Job</button></form>`,async f=>{return await sb.from("jobs").insert({job_number:f.get("job_number"),name:f.get("name"),customer_id:f.get("customer_id")||null,status:f.get("status"),contract_amount:Number(f.get("contract_amount")||0),description:f.get("description")})});
  const jb=e.target.closest("[data-job]"); if(jb){state.selected=state.jobs.find(x=>x.id===jb.dataset.job);await load();return}
  if(e.target.id==="close"){state.selected=null;render()}
- if(e.target.id==="addNote"||e.target.id==="quickNote"){if(!state.selected){toast("Open a job first.");return} modalForm("Add Field Note",`<form class="form"><textarea name="message" required placeholder="What happened on the job?"></textarea><button class="btn primary">Save Note</button></form>`,async f=>{await sb.from("job_activity").insert({job_id:state.selected.id,profile_id:session.user.id,event_type:"field_note",message:f.get("message")})})}
- if(e.target.id==="addMaterial"||e.target.id==="quickMaterial"){if(!state.selected){toast("Open a job first.");return} modalForm("Material Request",`<form class="form"><input name="item" required placeholder="Material"><input name="quantity" type="number" step=".01" value="1"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary">Request Material</button></form>`,async f=>{await sb.from("material_requests").insert({job_id:state.selected.id,requested_by:session.user.id,item:f.get("item"),quantity:Number(f.get("quantity")||1),notes:f.get("notes")})})}
+ if(e.target.id==="addNote"||e.target.id==="quickNote"){if(!state.selected){toast("Open a job first.");return} modalForm("Add Field Note",`<form class="form"><textarea name="message" required placeholder="What happened on the job?"></textarea><button class="btn primary">Save Note</button></form>`,async f=>{return await sb.from("job_activity").insert({job_id:state.selected.id,profile_id:session.user.id,event_type:"field_note",message:f.get("message")})})}
+ if(e.target.id==="addMaterial"||e.target.id==="quickMaterial"){if(!state.selected){toast("Open a job first.");return} modalForm("Material Request",`<form class="form"><input name="item" required placeholder="Material"><input name="quantity" type="number" step=".01" value="1"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary">Request Material</button></form>`,async f=>{return await sb.from("material_requests").insert({job_id:state.selected.id,requested_by:session.user.id,item:f.get("item"),quantity:Number(f.get("quantity")||1),notes:f.get("notes")})})}
  if(e.target.id==="addPhoto"){toast("Photo storage hookup is the next V4 step.")}
  if(e.target.id==="refresh"){await load()}
 });
