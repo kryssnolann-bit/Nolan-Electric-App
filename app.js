@@ -2,7 +2,7 @@ const { createClient } = window.supabase;
 const cfg=window.NOLAN_CONFIG;
 const root=document.getElementById("app");
 let sb=null, session=null, profile=null;
-let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],loading:false,selected:null};
+let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],employeeRates:{},loading:false,selected:null};
 
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
@@ -71,11 +71,16 @@ function employeeForm(p){
  <input name="email" type="email" value="${esc(p?.email||"")}" placeholder="Email address" ${p?"readonly":"required"}>
  <input name="phone" value="${esc(p?.phone||"")}" placeholder="Phone">
  <select name="role">${roles.map(r=>`<option value="${r}" ${p?.role===r?"selected":""}>${statusLabel(r)}</option>`).join("")}</select>
+ ${p?`<input name="labor_cost_rate" type="number" min="0" step="0.01" value="${Number(state.employeeRates[p.id]||0)}" placeholder="Internal labor cost / hour"><div class="sub">Internal cost only — employee will never see this rate.</div>`:""}
  ${p?`<label style="display:flex;align-items:center;gap:8px"><input name="active" type="checkbox" ${p.active?"checked":""}> Active employee</label>`:`<p class="sub">A temporary password will be generated for the employee. Give it to them securely, then have them change it after signing in.</p>`}
  <button class="btn primary" type="submit">${p?"Save Changes":"Create Employee"}</button></form>`,async f=>{
   if(p){
    const r=await sb.functions.invoke("employee-admin",{body:{action:"update",id:p.id,full_name:f.get("full_name"),phone:f.get("phone"),role:f.get("role"),active:f.get("active")==="on"}});
    if(!r.error && r.data?.error) return {error:new Error(r.data.error)};
+   if(r.error) return r;
+   const rate=Number(f.get("labor_cost_rate")||0);
+   const rr=await sb.from("employee_labor_rates").upsert({profile_id:p.id,labor_cost_rate:rate,updated_at:new Date().toISOString()});
+   if(rr.error) return rr;
    return r;
   }
   const r=await sb.functions.invoke("employee-admin",{body:{action:"create",full_name:f.get("full_name"),email:f.get("email"),phone:f.get("phone"),role:f.get("role")}});
@@ -98,6 +103,15 @@ function field(){
  <div class="card" style="margin-top:14px"><h2>Assigned Jobs</h2>${jobList(state.jobs,true)}</div>`;
 }
 
+function entryMinutes(x){
+ if(x.duration_minutes!=null) return Number(x.duration_minutes)||0;
+ if(!x.started_at) return 0;
+ return Math.max(0,Math.round((new Date(x.ended_at||Date.now())-new Date(x.started_at))/60000));
+}
+function actualLaborCost(entries){
+ return (entries||[]).reduce((sum,x)=>sum+(entryMinutes(x)/60)*Number(state.employeeRates[x.profile_id]||0),0);
+}
+
 function jobModal(j){
  const fieldUser=isFieldUser();
  const tasks=state.tasks.filter(t=>t.job_id===j.id);
@@ -107,11 +121,14 @@ function jobModal(j){
  const todaySeconds=fieldUser?state.timeEntries.filter(x=>x.profile_id===session.user.id&&new Date(x.started_at).toDateString()===new Date().toDateString()).reduce((a,x)=>a+(x.duration_minutes?Number(x.duration_minutes)*60:((new Date(x.ended_at||Date.now())-new Date(x.started_at))/1000)),0):0;
  const hoursFmt=s=>{const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return `${h}h ${String(m).padStart(2,"0")}m`};
  const timePanel=fieldUser?`<div class="card" style="margin:12px 0"><div class="row"><div><b>Time</b><div class="sub">Today: ${hoursFmt(todaySeconds)}</div></div>${activeTime?`<button class="btn primary" id="stopJob">STOP JOB</button>`:`<div style="display:flex;gap:6px"><button class="btn" id="logHours">LOG HOURS</button><button class="btn primary" id="startJob">START JOB</button></div>`}</div>${activeTime?`<div class="sub" style="margin-top:8px">Started ${new Date(activeTime.started_at).toLocaleTimeString([], {hour:"numeric",minute:"2-digit"})}</div>`:""}</div>`:"";
+ const actualLabor=actualLaborCost(state.timeEntries);
  const financial=fieldUser?"":`<div class="grid">
  <div class="card metric"><span>Contract</span><b>${money(j.contract_amount)}</b></div>
  <div class="card metric"><span>Est. Labor</span><b>${Number(j.estimated_labor_hours||0)}h</b></div>
- <div class="card metric"><span>Labor Cost</span><b>${money(j.estimated_labor_cost)}</b></div>
- <div class="card metric"><span>Materials</span><b>${money(j.estimated_material_cost)}</b></div></div>`;
+ <div class="card metric"><span>Actual Labor</span><b>${money(actualLabor)}</b></div>
+ <div class="card metric"><span>Materials</span><b>${money(j.estimated_material_cost)}</b></div>
+ <div class="card metric"><span>Current Cost</span><b>${money(actualLabor)}</b></div>
+ <div class="card metric"><span>Gross Profit*</span><b>${money(Number(j.contract_amount||0)-actualLabor)}</b></div></div><p class="sub">*Labor only for now. Material and other actual costs will be added to job costing next.</p>`;
  const status=fieldUser?"":`<h3>Status</h3><div class="status-buttons">${["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid"].map(s=>`<button class="pill ${j.status===s?"active":""}" data-status="${s}" data-jobstatus="${j.id}">${statusLabel(s)}</button>`).join("")}</div>`;
  const taskMarkup=tasks.map(t=>`<div class="job" style="margin-bottom:8px"><label style="display:block"><input type="checkbox" data-task="${t.id}" ${t.status==="complete"?"checked":""}> ${esc(t.title)}</label><div class="sub">${t.description?esc(t.description)+" · ":""}${t.assigned_to?"Assigned to "+esc(state.profiles.find(p=>p.id===t.assigned_to)?.full_name||"team member"):"Unassigned"}</div>${fieldUser?"":`<select class="task-assignee" data-task-assignee="${t.id}" style="margin-top:7px"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}" ${t.assigned_to===p.id?"selected":""}>${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select>`}</div>`).join("")||"<div class='empty'>No tasks yet.</div>";
  const taskHeader=fieldUser?`<h3>My Tasks</h3>`:`<h3>Tasks <button id="addTask" class="btn" style="float:right">+ Task</button></h3>`;
@@ -136,6 +153,12 @@ async function load(){
   const pr=await sb.from("profiles").select("*").order("created_at");
   if(pr.error)throw new Error("Team could not be loaded: "+pr.error.message);
   state.profiles=pr.data||[];
+  state.employeeRates={};
+  if(!isFieldUser()){
+   const er=await sb.from("employee_labor_rates").select("profile_id,labor_cost_rate");
+   if(er.error)throw new Error("Labor rates could not be loaded: "+er.error.message);
+   (er.data||[]).forEach(x=>state.employeeRates[x.profile_id]=Number(x.labor_cost_rate||0));
+  }
   const jr=await sb.from("jobs").select("*,customers(name)").order("created_at",{ascending:false});
   if(jr.error)throw new Error("Jobs could not be loaded: "+jr.error.message);
   const allJobs=jr.data||[];
@@ -221,7 +244,7 @@ document.addEventListener("click",async e=>{
  if(e.target.id==="addNote"||e.target.id==="quickNote"){if(!state.selected){toast("Open a job first.");return}modalForm("Add Field Note",`<form class="form"><textarea name="message" required placeholder="What happened on the job?"></textarea><button class="btn primary" type="submit">Save Note</button></form>`,async f=>sb.from("job_activity").insert({job_id:state.selected.id,profile_id:session.user.id,event_type:"field_note",message:f.get("message")}));return}
  if(e.target.id==="addMaterial"||e.target.id==="quickMaterial"){if(!state.selected){toast("Open a job first.");return}modalForm("Material Request",`<form class="form"><input name="item" required placeholder="Material"><input name="quantity" type="number" step=".01" value="1"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary" type="submit">Request Material</button></form>`,async f=>sb.from("material_requests").insert({job_id:state.selected.id,requested_by:session.user.id,item:f.get("item"),quantity:Number(f.get("quantity")||1),notes:f.get("notes")}));return}
  if(e.target.id==="startJob"){if(!state.selected)return;const existing=state.timeEntries.find(x=>x.profile_id===session.user.id&&!x.ended_at);if(existing){toast("You already have a job running.");return}const r=await sb.from("time_entries").insert({job_id:state.selected.id,profile_id:session.user.id,started_at:new Date().toISOString()}).select().single();if(r.error)toast(r.error.message);else await load();return}
- if(e.target.id==="stopJob"){if(!state.selected)return;const active=state.timeEntries.find(x=>x.profile_id===session.user.id&&!x.ended_at);if(!active){toast("No active timer for this job.");return}const r=await sb.from("time_entries").update({ended_at:new Date().toISOString()}).eq("id",active.id);if(r.error)toast(r.error.message);else await load();return}
+ if(e.target.id==="stopJob"){if(!state.selected)return;const active=state.timeEntries.find(x=>x.profile_id===session.user.id&&!x.ended_at);if(!active){toast("No active timer for this job.");return}const ended=new Date(); const mins=Math.max(1,Math.round((ended-new Date(active.started_at))/60000)); const r=await sb.from("time_entries").update({ended_at:ended.toISOString(),duration_minutes:mins}).eq("id",active.id);if(r.error)toast(r.error.message);else await load();return}
  if(e.target.id==="logHours"){if(!state.selected)return;modalForm("Log Hours",`<form class="form"><input name="hours" type="number" min="0.01" step="0.25" placeholder="Hours worked" required><textarea name="notes" placeholder="What was completed?"></textarea><button class="btn primary" type="submit">Save Hours</button></form>`,async f=>{const hours=Number(f.get("hours")||0);const now=new Date().toISOString();return sb.from("time_entries").insert({job_id:state.selected.id,profile_id:session.user.id,started_at:now,ended_at:now,duration_minutes:Math.round(hours*60),notes:f.get("notes")})});return}
  if(e.target.id==="addPhoto"){toast("Photo storage is the next field feature.")}
  if(e.target.id==="refresh"){await load();return}
