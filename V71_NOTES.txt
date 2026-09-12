@@ -1,0 +1,13 @@
+Nolan Electric Job Command Center V71
+
+Built from the verified V70 foundation.
+
+Changes:
+- Office To-Do items are now actionable and open a dedicated detail page.
+- Material requests can be reviewed and status updated directly.
+- Open tasks open a dedicated detail page with direct Open Job action.
+- Overdue invoices open a dedicated detail page with direct Open Job/Financial action.
+- Added Needs Attention count to dashboard.
+- Admin load now fetches company-wide open tasks and invoices so dashboard counts are accurate.
+- Existing V68/V69/V70 field workflows remain intact.
+- Existing config.js remains external and untouched.
