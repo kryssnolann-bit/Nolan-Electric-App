@@ -2,7 +2,7 @@ const { createClient } = window.supabase;
 const cfg=window.NOLAN_CONFIG;
 const root=document.getElementById("app");
 let sb=null, session=null, profile=null;
-let state={tab:"dashboard",jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],employeeRates:{},jobCosts:[],invoices:[],changeOrders:[],companyTimeEntries:[],companyJobCosts:[],estimates:[],estimateItems:[],payments:[],reports:[],photos:[],materials:[],activity:[],properties:[],loading:false,selected:null,customerSearch:""};
+let state={tab:"dashboard",page:{type:"tab",tab:"dashboard"},history:[],jobs:[],customers:[],tasks:[],members:[],profiles:[],timeEntries:[],employeeRates:{},jobCosts:[],invoices:[],changeOrders:[],companyTimeEntries:[],companyJobCosts:[],estimates:[],estimateItems:[],payments:[],reports:[],photos:[],materials:[],activity:[],properties:[],loading:false,selected:null,customerSearch:""};
 
 const esc=v=>String(v??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const money=v=>new Intl.NumberFormat("en-US",{style:"currency",currency:"USD"}).format(Number(v||0));
@@ -20,6 +20,22 @@ const statusLabel=v=>String(v||"").replaceAll("_"," ").replace(/\b\w/g,x=>x.toUp
 function toast(msg){alert(msg)}
 function isFieldUser(){return profile?.role==="employee"||profile?.role==="crew_lead"}
 function normalizeTab(){if(isFieldUser() && !["field","jobs"].includes(state.tab)) state.tab="field"; if(!isFieldUser() && state.tab==="field") state.tab="dashboard"}
+function currentPage(){ return state.page || {type:"tab",tab:state.tab||"dashboard"}; }
+function navigate(page,{replace=false}={}){
+ const cur=currentPage();
+ if(!replace && JSON.stringify(cur)!==JSON.stringify(page)) state.history.push(cur);
+ state.page=page;
+ state.tab=page.type==="tab"?page.tab:(page.type==="customer"?"customers":"jobs");
+ state.selected=page.type==="job" ? state.jobs.find(j=>j.id===page.id)||null : null;
+ load();
+}
+function goBack(){
+ const prev=state.history.pop();
+ if(!prev){ navigate({type:"tab",tab:isFieldUser()?"field":"dashboard"},{replace:true}); return; }
+ state.page=prev; state.tab=prev.type==="tab"?prev.tab:(prev.type==="customer"?"customers":"jobs");
+ state.selected=prev.type==="job" ? state.jobs.find(j=>j.id===prev.id)||null : null;
+ load();
+}
 function render(){normalizeTab();root.innerHTML=session?appShell():login();}
 
 function login(){return `<div style="min-height:100vh;display:grid;place-items:center;padding:20px"><div class="card" style="max-width:420px;width:100%"><div class="brand">Nolan Electric</div><p>Job Command Center</p><form id="login" class="form"><input id="email" type="email" placeholder="Email" required><input id="pw" type="password" placeholder="Password" required><button class="btn primary">Sign In</button></form><p class="sub">Use the employee account created in Supabase Auth.</p></div></div>`}
@@ -28,8 +44,12 @@ function appShell(){
  const isField=isFieldUser();
  const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","schedule","team","financial"];
  const tabNames={dashboard:"Dashboard",customers:"Customers",jobs:"Jobs",schedule:"Schedule",team:"Team",financial:"Financial",field:"My Day"};
- const activeTab=state.selected?"jobs":state.tab;
- const view=state.selected?jobPage(state.selected):(isField?(state.tab==="jobs"?jobs():field()):(state.tab==="dashboard"?dashboard():state.tab==="customers"?customers():state.tab==="jobs"?jobs():state.tab==="schedule"?schedule():state.tab==="team"?team():state.tab==="financial"?financial():dashboard()));
+ const page=currentPage();
+ const activeTab=page.type==="customer"?"customers":page.type==="job"?"jobs":page.tab;
+ let view;
+ if(page.type==="customer") view=customerPage(state.customers.find(c=>c.id===page.id));
+ else if(page.type==="job") view=state.selected?jobPage(state.selected):jobs();
+ else view=isField?(page.tab==="jobs"?jobs():field()):(page.tab==="dashboard"?dashboard():page.tab==="customers"?customers():page.tab==="jobs"?jobs():page.tab==="schedule"?schedule():page.tab==="team"?team():page.tab==="financial"?financial():dashboard());
  return `<div class="app-shell">
  <header class="app-header">
   <div class="brand-lockup"><img src="nolan-logo-transparent.png" class="brand-logo" alt="Nolan Electric"><div><div class="brand-title">Nolan Electric</div><div class="brand-subtitle">JOB COMMAND CENTER</div><div class="brand-tagline">PLAN <i>•</i> TRACK <i>•</i> BUILD <i>•</i> SUCCEED</div></div></div>
@@ -74,7 +94,7 @@ function customers(){
  const list=state.customers.filter(c=>!q||[c.name,c.company,c.phone,c.email].some(v=>String(v||'').toLowerCase().includes(q)));
  return `<div class="card"><div class="row"><div><h2>Customers</h2><div class="sub">${state.customers.length} customers · click a customer to open their account</div></div><button id="newCustomer" class="btn primary">+ Customer</button></div>
  <input id="customerSearch" class="search-input" value="${esc(state.customerSearch)}" placeholder="Search customers, companies, phone or email…" style="margin:14px 0">
- <div class="customer-grid">${list.map(c=>{const props=state.properties.filter(p=>p.customer_id===c.id);const jobs=state.jobs.filter(j=>j.customer_id===c.id);return `<div class="customer-card" data-customer="${c.id}"><div class="row"><div><b>${esc(c.name)}</b><div class="sub">${esc(c.company||'Individual')}</div></div><span class="avatar small">${esc((c.name||'?').slice(0,1).toUpperCase())}</span></div><div class="customer-contact">${c.phone?`<span>☎ ${esc(c.phone)}</span>`:''}${c.email?`<span>✉ ${esc(c.email)}</span>`:''}</div><div class="customer-summary"><span><b>${props.length}</b> ${props.length===1?'property':'properties'}</span><span><b>${jobs.length}</b> ${jobs.length===1?'job':'jobs'}</span></div></div>`}).join('')||`<div class="empty">No customers match your search.</div>`}</div></div>`;
+ <div class="customer-grid">${customerGridMarkup()}</div></div>`;
 }
 
 function jobs(){
@@ -411,7 +431,7 @@ async function openNewJob(){
 
 document.addEventListener("click",async e=>{
  if(e.target.id==='globalSearch'){globalSearch();return}
- const cc=e.target.closest('[data-customer]');if(cc){const c=state.customers.find(x=>x.id===cc.dataset.customer);if(c)customerDetails(c);return}
+ const cc=e.target.closest('[data-customer]');if(cc){navigate({type:"customer",id:cc.dataset.customer});return}
  if(e.target.id==='addEstimateLine'){const rows=e.target.closest('.sheet')?.querySelector('#estimateRows');if(rows){const n=rows.querySelectorAll('.estimate-edit-row').length;rows.insertAdjacentHTML('beforeend',`<div class="estimate-edit-row"><input name="desc_${n}" placeholder="Description"><input name="qty_${n}" type="number" step=".01" value="1"><input name="price_${n}" type="number" step=".01" value="0"><input name="cat_${n}" value="Electrical"></div>`)}return}
  if(e.target.id==='createEstimate'){if(state.selected&&!isFieldUser())estimateEditor(state.selected);return}
  if(e.target.id==='printEstimate'){const est=state.estimates.find(x=>x.job_id===state.selected?.id);if(est)printEstimate(est,state.selected,state.estimateItems.filter(x=>x.estimate_id===est.id));return}
@@ -420,16 +440,18 @@ document.addEventListener("click",async e=>{
  if(e.target.id==='addPhoto'||e.target.id==='addPhoto2'){if(state.selected)photoPicker();return}
  if(e.target.id==='jobShare'){navigator.clipboard?.writeText(location.href).then(()=>toast('Job link copied.')).catch(()=>toast('Use browser share to share this job.'));return}
 
- const tab=e.target.closest("[data-tab]");if(tab){state.tab=tab.dataset.tab;state.selected=null;await load();return}
+ const tab=e.target.closest("[data-tab]");if(tab){navigate({type:"tab",tab:tab.dataset.tab});return}
  if(e.target.id==="logout"){await sb.auth.signOut();return}
  if(e.target.id==="newEmployee"){employeeForm();return}
  const emp=e.target.closest("[data-employee]");if(emp){const p=state.profiles.find(x=>x.id===emp.dataset.employee);if(p)employeeForm(p);return}
  if(e.target.id==="newCustomer")modalForm("New Customer",`<form class="form"><input name="name" placeholder="Customer name" required><input name="company" placeholder="Company"><input name="phone" placeholder="Phone"><input name="email" type="email" placeholder="Email"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary" type="submit">Save Customer</button></form>`,async f=>sb.from("customers").insert({name:f.get("name"),company:f.get("company"),phone:f.get("phone"),email:f.get("email"),notes:f.get("notes")}));
  if(e.target.id==="addPropertyInline")return;
- if(e.target.id==="customerSearch"){state.customerSearch=e.target.value;return;}
+
+ if(e.target.id==="editCustomerPage"){const c=state.customers.find(x=>x.id===currentPage().id);if(c)modalForm("Edit Customer",`<form class="form"><input name="name" value="${esc(c.name)}" required><input name="company" value="${esc(c.company||'')}" placeholder="Company"><input name="phone" value="${esc(c.phone||'')}" placeholder="Phone"><input name="email" type="email" value="${esc(c.email||'')}" placeholder="Email"><textarea name="notes" placeholder="Notes">${esc(c.notes||'')}</textarea><button class="btn primary" type="submit">Save Customer</button></form>`,f=>sb.from('customers').update({name:f.get('name'),company:f.get('company'),phone:f.get('phone'),email:f.get('email'),notes:f.get('notes')}).eq('id',c.id));return;}
+ if(e.target.id==="addPropertyPage"){const c=state.customers.find(x=>x.id===currentPage().id);if(c)propertyForm(c);return;}
  if(e.target.id==="newJob")return openNewJob();
- const jb=e.target.closest("[data-job]");if(jb){state.selected=state.jobs.find(x=>x.id===jb.dataset.job);await load();return}
- if(e.target.id==="close"){state.selected=null;render();return}
+ const jb=e.target.closest("[data-job]");if(jb){navigate({type:"job",id:jb.dataset.job});return}
+ if(e.target.id==="close"){goBack();return}
  const st=e.target.closest("[data-jobstatus]");if(st){const id=st.dataset.jobstatus,s=st.dataset.status;const r=await sb.from("jobs").update({status:s}).eq("id",id);if(r.error)toast(r.error.message);else{state.selected={...state.selected,status:s};await load()}return}
  if(e.target.id==="addTask"){if(!state.selected)return;const assignable=state.profiles.filter(p=>p.active&&p.role!=="customer");modalForm("Add Task",`<form class="form"><input name="title" placeholder="Task" required><textarea name="description" placeholder="Task details"></textarea><select name="assigned_to"><option value="">Unassigned</option>${assignable.map(p=>`<option value="${p.id}">${esc(p.full_name)} · ${esc(p.role)}</option>`).join("")}</select><button class="btn primary" type="submit">Add Task</button></form>`,async f=>sb.from("job_tasks").insert({job_id:state.selected.id,title:f.get("title"),description:f.get("description"),assigned_to:f.get("assigned_to")||null,status:"open"}));return}
  if(e.target.id==="editSchedule"){if(!state.selected||isFieldUser())return;const j=state.selected;modalForm("Schedule Job",`<form class="form"><input name="scheduled_start" type="date" value="${j.scheduled_start?String(j.scheduled_start).slice(0,10):""}" required><select name="status"><option value="approved" ${j.status==="approved"?"selected":""}>Approved</option><option value="scheduled" ${j.status==="scheduled"?"selected":""}>Scheduled</option><option value="in_progress" ${j.status==="in_progress"?"selected":""}>In Progress</option></select><p class="sub">Choose the work date. Crew assignments stay attached to the job.</p><button class="btn primary" type="submit">Save Schedule</button></form>`,async f=>sb.from("jobs").update({scheduled_start:f.get("scheduled_start")||null,status:f.get("status")||j.status}).eq("id",j.id));return}
@@ -494,6 +516,14 @@ document.addEventListener("change",async e=>{
  const taskId=e.target.dataset.taskAssignee;if(taskId){const assigned=e.target.value||null;const r=await sb.from("job_tasks").update({assigned_to:assigned}).eq("id",taskId);if(r.error)toast(r.error.message);else await load()}
 });
 
+document.addEventListener("input",e=>{
+ if(e.target.id==="customerSearch"){state.customerSearch=e.target.value; const box=document.querySelector(".customer-grid"); if(box) box.innerHTML=customerGridMarkup();}
+});
+
+document.addEventListener("click",e=>{
+ if(e.target.id==="backButton"){goBack();return;}
+});
+
 document.addEventListener("submit",async e=>{
  if(e.target.id==="login"){e.preventDefault();const {error}=await sb.auth.signInWithPassword({email:e.target.email.value,password:e.target.pw.value});if(error)toast(error.message)}
 });
@@ -504,19 +534,30 @@ function estimateEditor(j){
 }
 function recordPayment(inv){modalForm('Record Payment',`<form class="form"><p class="sub">Invoice ${esc(inv.invoice_number)} · ${money(inv.total)}</p><input name="amount" type="number" min=".01" step=".01" value="${inv.total}" required><input name="payment_date" type="date" value="${new Date().toISOString().slice(0,10)}"><select name="method"><option>Check</option><option>ACH</option><option>Card</option><option>Cash</option><option>Other</option></select><input name="reference" placeholder="Check # / confirmation"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary" type="submit">Record Payment</button></form>`,async f=>{const r=await sb.from('payments').insert({invoice_id:inv.id,amount:Number(f.get('amount')||0),payment_date:f.get('payment_date'),method:f.get('method'),reference:f.get('reference'),notes:f.get('notes')});if(r.error)return r;const all=await sb.from('payments').select('amount').eq('invoice_id',inv.id);const sum=(all.data||[]).reduce((a,x)=>a+Number(x.amount||0),0);const status=sum>=Number(inv.total||0)?'paid':'sent';return sb.from('invoices').update({status,paid_at:status==='paid'?new Date().toISOString():null}).eq('id',inv.id)})}
 function photoPicker(){const wrap=document.createElement('div');wrap.className='modal';wrap.innerHTML=`<div class="sheet"><div class="row"><h2>Add Job Photo</h2><button class="btn" id="x">Close</button></div><form class="form"><input id="photoFile" type="file" accept="image/*" capture="environment" required><input name="caption" placeholder="Caption"><button class="btn primary" type="submit">Upload Photo</button></form></div>`;document.body.appendChild(wrap);wrap.querySelector('#x').onclick=()=>wrap.remove();wrap.querySelector('form').onsubmit=async e=>{e.preventDefault();const file=wrap.querySelector('#photoFile').files[0];if(!file)return;const path=state.selected.id+'/'+crypto.randomUUID()+'-'+file.name.replace(/[^a-zA-Z0-9._-]/g,'_');const up=await sb.storage.from('job-photos').upload(path,file,{upsert:false});if(up.error){toast(up.error.message);return}const url=sb.storage.from('job-photos').getPublicUrl(path).data.publicUrl;const r=await sb.from('job_photos').insert({job_id:state.selected.id,uploaded_by:session.user.id,storage_path:path,caption:e.target.caption.value});if(r.error){toast(r.error.message);return}wrap.remove();await load();toast('Photo uploaded.')}}
-function customerDetails(c){
- const jobs=state.jobs.filter(j=>j.customer_id===c.id); const props=state.properties.filter(p=>p.customer_id===c.id);
+function customerGridMarkup(){
+ const q=state.customerSearch.trim().toLowerCase();
+ const list=state.customers.filter(c=>!q||[c.name,c.company,c.phone,c.email].some(v=>String(v||'').toLowerCase().includes(q)));
+ return list.map(c=>{const props=state.properties.filter(p=>p.customer_id===c.id);const jobs=state.jobs.filter(j=>j.customer_id===c.id);return `<div class="customer-card" data-customer="${c.id}"><div class="row"><div><b>${esc(c.name)}</b><div class="sub">${esc(c.company||'Individual')}</div></div><span class="avatar small">${esc((c.name||'?').slice(0,1).toUpperCase())}</span></div><div class="customer-contact">${c.phone?`<span>☎ ${esc(c.phone)}</span>`:''}${c.email?`<span>✉ ${esc(c.email)}</span>`:''}</div><div class="customer-summary"><span><b>${props.length}</b> ${props.length===1?'property':'properties'}</span><span><b>${jobs.length}</b> ${jobs.length===1?'job':'jobs'}</span></div></div>`}).join('')||`<div class="empty">No customers match your search.</div>`;
+}
+function customerPage(c){
+ if(!c) return `<div class="card"><button class="btn" id="backButton">← Back</button><h2>Customer not found</h2></div>`;
+ const jobs=state.jobs.filter(j=>j.customer_id===c.id).sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0));
+ const props=state.properties.filter(p=>p.customer_id===c.id);
  const propAddress=p=>[p.address_line1,p.city,p.state,p.postal_code].filter(Boolean).join(', ');
- modalForm('Customer Account',`<div class="customer-detail"><div class="customer-hero"><div class="avatar">${esc((c.name||'?').slice(0,1).toUpperCase())}</div><div><h2>${esc(c.name)}</h2><p>${esc(c.company||'Individual')}</p></div><button class="btn" id="editCustomerInline" style="margin-left:auto">Edit</button></div>
- <div class="detail-grid"><div><span>Phone</span><b>${esc(c.phone||'—')}</b></div><div><span>Email</span><b>${esc(c.email||'—')}</b></div></div>
- <div class="row"><h3>Properties</h3><button class="btn primary" id="addPropertyInline">+ Property</button></div>
- <div class="list">${props.map(p=>`<div class="job"><b>${esc(propAddress(p))}</b><div class="sub">${jobs.filter(j=>j.property_id===p.id).length} job${jobs.filter(j=>j.property_id===p.id).length===1?'':'s'}</div></div>`).join('')||'<div class="empty">No properties yet. Add the first job-site address.</div>'}</div>
- <h3>Job History</h3>${jobs.map(j=>`<div class="job"><b>${esc(j.job_number)} · ${esc(j.name)}</b><div class="sub">${statusLabel(j.status)} · ${money(j.contract_amount)}${j.property_id&&props.find(p=>p.id===j.property_id)?` · ${esc(propAddress(props.find(p=>p.id===j.property_id)))}`:''}</div></div>`).join('')||'<div class="empty">No jobs yet.</div>'}
- <h3>Notes</h3><p>${esc(c.notes||'No customer notes.')}</p></div>`,async()=>({}));
- const wrap=document.querySelector('.modal:last-child');
- if(wrap){wrap.querySelector('#editCustomerInline').onclick=()=>{wrap.remove();modalForm('Edit Customer',`<form class="form"><input name="name" value="${esc(c.name)}" required><input name="company" value="${esc(c.company||'')}" placeholder="Company"><input name="phone" value="${esc(c.phone||'')}" placeholder="Phone"><input name="email" type="email" value="${esc(c.email||'')}" placeholder="Email"><textarea name="notes" placeholder="Notes">${esc(c.notes||'')}</textarea><button class="btn primary" type="submit">Save Customer</button></form>`,f=>sb.from('customers').update({name:f.get('name'),company:f.get('company'),phone:f.get('phone'),email:f.get('email'),notes:f.get('notes')}).eq('id',c.id));};
-  wrap.querySelector('#addPropertyInline').onclick=()=>{wrap.remove();propertyForm(c);};
- }
+ const contract=jobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
+ const inv=state.invoices.filter(i=>jobs.some(j=>j.id===i.job_id));
+ const invoiced=inv.reduce((a,i)=>a+Number(i.total||0),0);
+ const pays=state.payments.filter(p=>inv.some(i=>i.id===p.invoice_id));
+ const paid=pays.reduce((a,p)=>a+Number(p.amount||0),0);
+ return `<div class="customer-page">
+  <div class="page-back"><button class="btn" id="backButton">← Customers</button></div>
+  <section class="card customer-account-hero"><div class="customer-account-main"><div class="avatar">${esc((c.name||'?').slice(0,1).toUpperCase())}</div><div><div class="eyebrow">CUSTOMER ACCOUNT</div><h1>${esc(c.name)}</h1><p>${esc(c.company||'Individual')} ${c.phone?` · ${esc(c.phone)}`:''} ${c.email?` · ${esc(c.email)}`:''}</p></div></div><div class="customer-account-actions"><button class="btn" id="editCustomerPage">Edit Customer</button><button class="btn primary" id="addPropertyPage">+ Property</button></div></section>
+  <div class="customer360-stats"><div><span>Contract Value</span><b>${money(contract)}</b></div><div><span>Invoiced</span><b>${money(invoiced)}</b></div><div><span>Payments</span><b>${money(paid)}</b></div><div><span>Balance</span><b>${money(Math.max(0,invoiced-paid))}</b></div></div>
+  <div class="customer360-grid"><section class="card"><div class="section-head"><div><div class="eyebrow">JOB SITES</div><h2>Properties</h2></div></div>${props.map(p=>`<div class="job"><b>${esc(propAddress(p))}</b><div class="sub">${jobs.filter(j=>j.property_id===p.id).length} job${jobs.filter(j=>j.property_id===p.id).length===1?'':'s'}</div></div>`).join('')||'<div class="empty">No properties yet.</div>'}</section>
+  <section class="card"><div class="section-head"><div><div class="eyebrow">WORK HISTORY</div><h2>Jobs</h2></div><span class="sub">${jobs.length} total</span></div>${jobs.map(j=>`<button class="job customer-job-link" data-job="${j.id}"><div class="row"><div><b>${esc(j.job_number)} · ${esc(j.name)}</b><div class="sub">${statusLabel(j.status)} · ${j.property_id&&props.find(p=>p.id===j.property_id)?esc(propAddress(props.find(p=>p.id===j.property_id))):'No property assigned'}</div></div><b>${money(j.contract_amount)}</b></div></button>`).join('')||'<div class="empty">No jobs yet.</div>'}</section></div>
+  <section class="card customer-history"><div class="eyebrow">ACCOUNT HISTORY</div><h2>Estimates, Invoices & Payments</h2>${inv.map(i=>`<div class="history-list"><div><b>${esc(i.invoice_number||'Invoice')}</b><small>${statusLabel(i.status)} · ${dateFmt(i.due_date)}</small></div><b>${money(i.total)}</b><span>${money(pays.filter(p=>p.invoice_id===i.id).reduce((a,p)=>a+Number(p.amount||0),0))} paid</span></div>`).join('')||'<div class="empty">No invoices yet.</div>'}</section>
+  <section class="card customer-history"><div class="eyebrow">NOTES</div><p>${esc(c.notes||'No customer notes.')}</p></section>
+ </div>`;
 }
 function propertyForm(c){modalForm('Add Property',`<form class="form"><p class="sub">Property for ${esc(c.name)}</p><input name="address_line1" placeholder="Street address" required><input name="city" placeholder="City"><input name="state" placeholder="State" value="GA"><input name="postal_code" placeholder="ZIP"><button class="btn primary" type="submit">Save Property</button></form>`,f=>sb.from('properties').insert({customer_id:c.id,address_line1:f.get('address_line1'),city:f.get('city'),state:f.get('state'),postal_code:f.get('postal_code')}));}
 
