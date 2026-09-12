@@ -3,18 +3,14 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#111111"><title>Nolan Electric</title>
-<link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="styles-v78.css">
+<link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="styles-v79.css">
 <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black">
 <link rel="icon" type="image/png" sizes="32x32" href="icon-32.png"><link rel="apple-touch-icon" href="icon-180.png">
 </head>
 <body>
 <div id="app"><div class="wrap" style="padding:24px"><div class="card" style="max-width:520px;margin:40px auto"><div class="brand">Nolan Electric</div><p>Starting Job Command Center…</p></div></div></div>
-<script>
-// V59 deliberately disables the old PWA service worker while we stabilize the app.
-// Remove any older Nolan Electric service worker/cache so stale JavaScript cannot take over.
-(async()=>{try{if('serviceWorker' in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.filter(r=>/nolan|github/i.test(r.scope||'' )).map(r=>r.unregister()));}if(window.caches){const keys=await caches.keys();await Promise.all(keys.filter(k=>/^nolan-electric-/i.test(k)).map(k=>caches.delete(k)));}}catch(e){console.warn('V59 cache cleanup skipped',e)}})();
-</script>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="config.js?v=78"></script>
-<script src="app-v78.js?v=78"></script>
+<script src="config.js?v=79"></script>
+<script src="app-v79.js?v=79"></script>
 </body></html>
