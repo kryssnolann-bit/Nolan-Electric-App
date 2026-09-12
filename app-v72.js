@@ -181,9 +181,10 @@ function customers(){
 
 function jobs(){
  const groups=["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid","closed"];
- return `<div class="card"><div class="row"><div><h2>Jobs</h2><div class="sub">${state.jobs.length} total jobs</div></div><button id="newJob" class="btn primary">+ New Job</button></div>
+ const field=isFieldUser();
+ return `<div class="card"><div class="row"><div><h2>Jobs</h2><div class="sub">${field?"Jobs assigned to you":state.jobs.length+" total jobs"}</div></div>${field?"":`<button id="newJob" class="btn primary">+ New Job</button>`}</div>
  <div class="job-filters">${groups.map(s=>`<button class="pill ${state.jobs.some(j=>j.status===s)?"active":""}" data-filter="${s}">${statusLabel(s)} (${state.jobs.filter(j=>j.status===s).length})</button>`).join("")}</div>
- <div id="jobResults">${jobList(state.jobs)}</div></div>`;
+ <div id="jobResults">${jobList(state.jobs,field)}</div></div>`;
 }
 
 
@@ -588,7 +589,7 @@ Next steps:"></textarea><button class="btn primary" type="submit">Save Report</b
  if(e.target.id==="editCustomerPage"){const c=state.customers.find(x=>x.id===currentPage().id);if(c)modalForm("Edit Customer",`<form class="form"><input name="name" value="${esc(c.name)}" required><input name="company" value="${esc(c.company||'')}" placeholder="Company"><input name="phone" value="${esc(c.phone||'')}" placeholder="Phone"><input name="email" type="email" value="${esc(c.email||'')}" placeholder="Email"><textarea name="notes" placeholder="Notes">${esc(c.notes||'')}</textarea><button class="btn primary" type="submit">Save Customer</button></form>`,f=>sb.from('customers').update({name:formValue(f,'name'),company:formValue(f,'company'),phone:formValue(f,'phone'),email:formValue(f,'email'),notes:formValue(f,'notes')}).eq('id',c.id));return;}
  if(e.target.id==="addPropertyPage"){const c=state.customers.find(x=>x.id===currentPage().id);if(c)propertyForm(c);return;}
  if(e.target.id==="newJobForCustomer"){const c=state.customers.find(x=>x.id===currentPage().id);if(c)openNewJob(c.id);return;}
- if(e.target.id==="newJob")return openNewJob();
+ if(e.target.id==="newJob"){if(isFieldUser())return;return openNewJob();}
  const jb=e.target.closest("[data-job]");if(jb){navigate({type:"job",id:jb.dataset.job});return}
  if(e.target.id==="close"){goBack();return}
  const st=e.target.closest("[data-jobstatus]");if(st){const id=st.dataset.jobstatus,s=st.dataset.status;const r=await sb.from("jobs").update({status:s}).eq("id",id);if(r.error)toast(r.error.message);else{state.selected={...state.selected,status:s};await load()}return}
