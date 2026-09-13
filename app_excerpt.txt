@@ -1,0 +1,381 @@
+ state.selected=page.type==="job" ? state.jobs.find(j=>j.id===page.id)||null : null;
+ const url="#"+(page.type==="tab"?page.tab:page.type+"/"+page.id);
+ if(!fromPop){ if(replace) history.replaceState({nolanPage:page},"",url); else history.pushState({nolanPage:page},"",url); }
+ render();
+ load();
+}
+function goBack(){
+ if(state.history.length){
+  const prev=state.history.pop();
+  navigate(prev,{replace:true});
+  return;
+ }
+ navigate({type:"tab",tab:isFieldUser()?"field":"dashboard"},{replace:true});
+}
+function render(){
+ normalizeTab();
+ // IMPORTANT: render the application into one root container. Every navigation replaces
+ // the previous page view; no page is ever appended underneath another page.
+ root.replaceChildren();
+ const shell=document.createElement("div");
+ shell.innerHTML=session?appShell():login();
+ while(shell.firstChild) root.appendChild(shell.firstChild);
+ if(state.page?.type==="estimate") setTimeout(updateEstimateTotals,0);
+ if(state.page?.type==="notifications") setTimeout(refreshPushSetting,0);
+}
+window.addEventListener("popstate",e=>{
+ const p=e.state?.nolanPage;
+ if(p){ state.page=p; state.tab=p.type==="tab"?p.tab:(p.type==="customer"?"customers":"jobs"); state.selected=p.type==="job"?state.jobs.find(j=>j.id===p.id)||null:null; render(); load(); }
+});
+
+function login(){return `<div class="login-screen"><div class="card login-card"><div class="brand">Nolan Electric</div><div class="eyebrow">JOB COMMAND CENTER</div><p>Sign in to continue.</p><form id="login" class="form"><input id="email" type="email" placeholder="Email" required><input id="pw" type="password" placeholder="Password" required><button class="btn primary">Sign In</button></form><p class="sub">Use the employee account created in Supabase Auth.</p></div></div>`}
+
+
+function fieldActionPage(page){
+ const action=page.action||"note";
+ const job=page.jobId?state.jobs.find(j=>j.id===page.jobId):null;
+ const jobs=state.jobs.filter(j=>!['closed'].includes(j.status));
+ const titles={note:"Add Field Note",material:"Request Material",photo:"Add Job Photo",report:"Daily Job Report",hours:"Log Hours"};
+ const subtitles={note:"Keep the office informed about what happened on the job.",material:"Tell the office exactly what material is needed.",photo:"Take a jobsite photo and attach it to this job.",report:"Record today's progress, crew, issues and next steps.",hours:"Enter time worked when you are not using the live timer."};
+ const jobSelect=!job?`<div class="action-job-select"><label>Job</label><select name="job_id" required><option value="">Select a job…</option>${jobs.map(j=>`<option value="${j.id}">${esc(j.name)}</option>`).join("")}</select></div>`:"";
+ const jobBanner=job?`<div class="action-job-banner"><span class="eyebrow">JOB</span><b>${esc(job.name)}</b><span>${esc(job.customers?.name||"No customer")}</span></div>`:"";
+ let fields="";
+ if(action==="note") fields=`<textarea name="message" required placeholder="What happened on the job?\n\nProgress:\nIssues / blockers:\nNext steps:"></textarea>`;
+ if(action==="material") fields=`<input name="item" required placeholder="Material needed"><input name="quantity" type="number" min="0.01" step=".01" value="1" placeholder="Quantity"><textarea name="notes" placeholder="Size, brand, location, urgency, or other details…"></textarea>`;
+ if(action==="photo") fields=`<label class="file-label"><span>📷 Take / choose photo</span><input name="photo_file" id="actionPhotoFile" type="file" accept="image/*" capture="environment"></label><div id="photoPreview" class="action-photo-preview">${pendingPhotoPreviewUrl?`<img src="${esc(pendingPhotoPreviewUrl)}" alt="Selected job photo"><span>✓ Photo ready to upload${pendingPhotoFile?.name?` · ${esc(pendingPhotoFile.name)}`:""}</span>`:`<span>No photo selected</span>`}</div><input name="caption" placeholder="Caption (optional)">`;
+ if(action==="report") fields=`<input name="report_date" type="date" value="${new Date().toISOString().slice(0,10)}" required><input name="hours" type="number" min="0" step=".25" placeholder="Hours worked"><textarea name="notes" required placeholder="What was completed today?\n\nCrew on site:\nIssues / blockers:\nMaterials needed:\nNext steps:"></textarea>`;
+ if(action==="hours") fields=`<input name="hours" type="number" min="0.01" step=".25" placeholder="Hours worked" required><textarea name="notes" placeholder="What was completed?"></textarea>`;
+ return `<div class="field-action-page"><div class="page-back"><button class="btn" id="fieldActionBack">← Back</button></div><section class="card field-action-card"><div class="eyebrow">FIELD UPDATE</div><h1>${titles[action]||"Field Update"}</h1><p class="action-subtitle">${subtitles[action]||"Send an update to the office."}</p>${jobBanner}<form id="fieldActionForm" class="field-action-form">${jobSelect}${fields}<button class="btn primary action-submit" type="submit">${action==="photo"?"Upload Photo":action==="material"?"Request Material":action==="report"?"Save Daily Report":action==="hours"?"Save Hours":"Save Note"}</button></form></section></div>`;
+}
+
+function attentionPage(page){
+ const kind=page.kind||"material"; const id=page.id;
+ if(kind==="material"){
+  const m=(state.materials||[]).find(x=>x.id===id); const j=m&&state.jobs.find(x=>x.id===m.job_id);
+  if(!m) return `<div class="card"><div class="page-back"><button class="btn" id="backButton">← Back</button></div><h2>Material request not found</h2></div>`;
+  return `<div class="attention-detail"><div class="page-back"><button class="btn" id="backButton">← Dashboard</button></div><section class="card"><div class="eyebrow">OFFICE TO-DO · MATERIAL</div><h1>${esc(m.item||"Material request")}</h1><div class="attention-detail-grid"><div><span>Job</span><b>${esc(j?.name||"Job")}</b></div><div><span>Requested by</span><b>${esc(personName(m.requested_by))}</b></div><div><span>Quantity</span><b>${esc(m.quantity||1)}</b></div><div><span>Requested</span><b>${dateTimeFmt(m.created_at)}</b></div></div>${m.notes?`<div class="attention-note"><b>Notes</b><p>${esc(m.notes)}</p></div>`:""}<label class="detail-label">Status<select class="attention-status" data-material-status="${m.id}"><option value="requested" ${m.status==="requested"?"selected":""}>Requested</option><option value="approved" ${m.status==="approved"?"selected":""}>Approved</option><option value="fulfilled" ${m.status==="fulfilled"?"selected":""}>Fulfilled</option><option value="closed" ${m.status==="closed"?"selected":""}>Closed</option></select></label><div class="detail-actions">${j?`<button class="btn primary" data-job="${j.id}">Open Job →</button>`:""}<button class="btn" id="backButton2">Back to Dashboard</button></div></section></div>`;
+ }
+ if(kind==="task"){
+  const t=(state.tasks||[]).find(x=>x.id===id); const j=t&&state.jobs.find(x=>x.id===t.job_id);
+  if(!t) return `<div class="card"><button class="btn" id="backButton">← Dashboard</button><h2>Task not found</h2></div>`;
+  return `<div class="attention-detail"><div class="page-back"><button class="btn" id="backButton">← Dashboard</button></div><section class="card"><div class="eyebrow">OFFICE TO-DO · OPEN TASK</div><h1>${esc(t.title||"Open task")}</h1><p class="action-subtitle">${esc(t.description||"Work still needs to be completed.")}</p><div class="attention-detail-grid"><div><span>Job</span><b>${esc(j?.name||"Job")}</b></div><div><span>Assigned to</span><b>${esc(personName(t.assigned_to))}</b></div><div><span>Status</span><b>${esc(statusLabel(t.status))}</b></div></div><div class="detail-actions">${j?`<button class="btn primary" data-job="${j.id}">Open Job →</button>`:""}</div></section></div>`;
+ }
+ if(kind==="invoice"){
+  const inv=(state.invoices||[]).find(x=>x.id===id); const j=inv&&state.jobs.find(x=>x.id===inv.job_id);
+  if(!inv) return `<div class="card"><button class="btn" id="backButton">← Dashboard</button><h2>Invoice not found</h2></div>`;
+  return `<div class="attention-detail"><div class="page-back"><button class="btn" id="backButton">← Dashboard</button></div><section class="card"><div class="eyebrow">OFFICE TO-DO · INVOICE</div><h1>${esc(inv.invoice_number||"Invoice")}</h1><div class="attention-detail-grid"><div><span>Job</span><b>${esc(j?.name||"Job")}</b></div><div><span>Status</span><b>${esc(statusLabel(inv.status))}</b></div><div><span>Total</span><b>${money(inv.total)}</b></div><div><span>Due</span><b>${dateFmt(inv.due_date)}</b></div></div><div class="detail-actions">${j?`<button class="btn primary" data-job="${j.id}">Open Job →</button>`:`<button class="btn primary" data-tab="financial">Open Financial →</button>`}</div></section></div>`;
+ }
+ return `<div class="card"><button class="btn" id="backButton">← Dashboard</button><h2>Attention item</h2></div>`;
+}
+
+function appShell(){
+ const isField=isFieldUser();
+ const tabs=isField?["field","jobs"]:["dashboard","customers","jobs","schedule","estimates","team","financial","labor"];
+ const tabNames={dashboard:"Dashboard",customers:"Customers",jobs:"Jobs",schedule:"Schedule",team:"Team",financial:"Financial",estimates:"Estimates",labor:"Labor & Payroll",field:"My Day"};
+ const page=currentPage();
+ const activeTab=page.type==="customer"?"customers":page.type==="job"?"jobs":page.tab;
+ let view;
+ if(page.type==="customer") view=customerPage(state.customers.find(c=>c.id===page.id));
+ else if(page.type==="job") view=state.selected?jobPage(state.selected):jobs();
+ else if(page.type==="action") view=fieldActionPage(page);
+ else if(page.type==="attention") view=attentionPage(page);
+ else if(page.type==="estimate") view=estimateEditorPage(page);
+ else if(page.type==="notifications") view=notificationPage();
+ else view=isField?(page.tab==="jobs"?jobs():field()):(page.tab==="dashboard"?dashboard():page.tab==="customers"?customers():page.tab==="jobs"?jobs():page.tab==="schedule"?schedule():page.tab==="estimates"?estimates():page.tab==="team"?team():page.tab==="financial"?financial():page.tab==="labor"?laborPayroll():dashboard());
+ return `<div class="app-shell">
+ <header class="app-header">
+  <div class="brand-lockup"><img src="nolan-logo-transparent.png" class="brand-logo" alt="Nolan Electric"><div><div class="brand-title">Nolan Electric</div><div class="brand-subtitle">JOB COMMAND CENTER</div><div class="brand-tagline">PLAN <i>•</i> TRACK <i>•</i> BUILD <i>•</i> SUCCEED</div></div></div>
+  <div class="header-tools"><div class="search-chip">⌕ <span>Search jobs, customers...</span></div><button class="notification-bell" id="openNotifications" aria-label="Notifications"><span>🔔</span>${notificationCount()?`<b>${notificationCount()>99?"99+":notificationCount()}</b>`:""}</button><div class="user-chip"><b>${esc(profile?.full_name||"User")}</b><span>${esc(profile?.role||"")}</span></div><button id="logout" class="btn header-signout">Sign Out</button></div>
+ </header>
+ <div class="app-layout">
+  <aside class="sidebar"><div class="sidebar-brand">NOLAN ELECTRIC</div>
+   ${tabs.map(t=>`<button data-tab="${t}" class="side-nav ${activeTab===t?"active":""}"><span>${({dashboard:"⌂",customers:"♟",jobs:"▣",schedule:"▦",estimates:"$",team:"♟",financial:"▥",labor:"⏱",field:"▣"})[t]||"•"}</span>${tabNames[t]}</button>`).join("")}
+   <div class="sidebar-spacer"></div><div class="trust-mark">MORE THAN POWER<br><b>PEOPLE YOU CAN TRUST</b></div>
+  </aside>
+  <main class="main-content"><div class="mobile-nav">${tabs.map(t=>`<button data-tab="${t}" class="${activeTab===t?"active":""}">${tabNames[t]}</button>`).join("")}</div>${view}</main>
+ </div>
+ <footer class="app-footer"><b>Nolan Electric Inc</b><span>ELECTRICAL CONTRACTOR · RESIDENTIAL • COMMERCIAL • INDUSTRIAL</span><em>MORE THAN POWER — PEOPLE YOU CAN TRUST</em></footer>
+ </div>`;
+}
+
+function dashboard(){
+ const jobs=state.jobs||[], invoices=state.invoices||[], payments=state.payments||[];
+ const active=jobs.filter(j=>!['paid','closed','complete'].includes(j.status));
+ const scheduled=jobs.filter(j=>j.status==='scheduled');
+ const inProgress=jobs.filter(j=>j.status==='in_progress');
+ const recent=[...jobs].sort((a,b)=>new Date(b.created_at||0)-new Date(a.created_at||0)).slice(0,6);
+ const totalContract=jobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
+ const pipelineStatuses=['lead','estimate'];
+ const pipelineJobs=jobs.filter(j=>pipelineStatuses.includes(j.status));
+ const pipelineValue=pipelineJobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
+ const bookedJobs=jobs.filter(j=>['approved','scheduled','in_progress','punch_list'].includes(j.status));
+ const bookedValue=bookedJobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
+ const paidTotal=payments.reduce((a,p)=>a+Number(p.amount||0),0);
+ const paidByInvoice={}; payments.forEach(p=>{if(p.invoice_id)paidByInvoice[p.invoice_id]=(paidByInvoice[p.invoice_id]||0)+Number(p.amount||0)});
+ const outstanding=invoices.reduce((a,i)=>a+Math.max(0,Number(i.total||0)-(paidByInvoice[i.id]||0)),0);
+ const overdue=invoices.filter(i=>i.status!=='paid'&&i.due_date&&new Date(i.due_date)<new Date());
+ const now=new Date(); const monthStart=new Date(now.getFullYear(),now.getMonth(),1); const nextMonth=new Date(now.getFullYear(),now.getMonth()+1,1);
+ const collectedMonth=payments.filter(p=>{const d=new Date(p.payment_date||p.created_at||0);return d>=monthStart&&d<nextMonth}).reduce((a,p)=>a+Number(p.amount||0),0);
+ const invoicedTotal=invoices.reduce((a,i)=>a+Number(i.total||0),0);
+ const laborByJob={}, costsByJob={};
+ (state.companyTimeEntries||[]).forEach(t=>{const rate=Number(state.employeeRates?.[t.profile_id]||0);laborByJob[t.job_id]=(laborByJob[t.job_id]||0)+(Number(t.duration_minutes||0)/60)*rate});
+ (state.companyJobCosts||[]).forEach(c=>{const amt=Number(c.amount||0);const x=costsByJob[c.job_id]||(costsByJob[c.job_id]={material:0,other:0,total:0});x.total+=amt;if(c.cost_type==='material')x.material+=amt;else x.other+=amt});
+ const jobIntel=jobs.map(j=>{const labor=laborByJob[j.id]||0,c=costsByJob[j.id]||{material:0,other:0,total:0},cost=labor+c.total,contract=Number(j.contract_amount||0),est=Number(j.estimated_labor_cost||0)+Number(j.estimated_material_cost||0)+Number(j.estimated_other_cost||0);return {j,labor,cost,contract,est,profit:contract-cost,margin:contract?((contract-cost)/contract*100):0,budget:budgetState(est,cost)}});
+ const actualCost=jobIntel.reduce((a,r)=>a+r.cost,0),grossProfit=totalContract-actualCost,grossMargin=totalContract?grossProfit/totalContract*100:0;
+ const overBudget=jobIntel.filter(r=>r.est>0&&r.cost>r.est*1.1);
+ const openTasks=(state.tasks||[]).filter(t=>!['completed','complete'].includes(String(t.status||'').toLowerCase()));
+ const openMaterials=(state.materials||[]).filter(m=>!['fulfilled','completed','complete','closed'].includes(String(m.status||'').toLowerCase()));
+ const attentionCount=openMaterials.length+openTasks.length+overdue.length;
+ const upcoming=[...scheduled].sort((a,b)=>new Date(a.scheduled_start||0)-new Date(b.scheduled_start||0)).slice(0,5);
+ const topJobs=jobIntel.filter(r=>r.contract>0).sort((a,b)=>b.profit-a.profit).slice(0,5);
+ const atRisk=jobIntel.filter(r=>r.est>0&&r.cost>r.est*1.05).sort((a,b)=>(b.cost-b.est)-(a.cost-a.est)).slice(0,5);
+ const recentActivity=(state.activity||[]).slice(0,6), recentReports=(state.reports||[]).slice(0,5);
+ const pipelineStages=[['lead','Leads'],['estimate','Estimates'],['approved','Approved'],['scheduled','Scheduled'],['in_progress','In Progress']];
+ const attention=[];
+ openMaterials.slice(0,2).forEach(m=>{const j=jobs.find(x=>x.id===m.job_id);attention.push({icon:'🧰',title:`${m.item||'Material request'} · Qty ${m.quantity||1}`,sub:`${j?.name||'Job'} · ${personName(m.requested_by)} · ${dateTimeFmt(m.created_at)}`,kind:'material',id:m.id,cta:'VIEW REQUEST →'});});
+ openTasks.slice(0,2).forEach(t=>{const j=jobs.find(x=>x.id===t.job_id);attention.push({icon:'☑',title:t.title||'Open task',sub:`${j?.name||'Job'} · ${personName(t.assigned_to)}`,kind:'task',id:t.id,cta:'VIEW TASK →'});});
+ overdue.slice(0,2).forEach(i=>{const j=jobs.find(x=>x.id===i.job_id);attention.push({icon:'$',title:`${i.invoice_number||'Invoice'} · ${money(Math.max(0,Number(i.total||0)-(paidByInvoice[i.id]||0)))}`,sub:`${j?.name||'Job'} · Due ${dateFmt(i.due_date)}`,kind:'invoice',id:i.id,cta:'VIEW INVOICE →'});});
+ if(!attention.length)attention.push({icon:'✓',title:'Nothing urgent',sub:'Your office is caught up right now',tab:'jobs',cta:'VIEW JOBS →'});
+ return `<div class="page-heading"><div><div class="eyebrow">OWNER COMMAND CENTER · V77</div><h1>${esc(dayGreeting())}.</h1><p>The numbers, jobs and follow-ups that matter most today.</p></div><button id="newJob" class="btn primary big-action">+ New Job</button></div>
+ <div class="metric-grid v77-kpis">
+  <div class="card metric-v2"><span>Contract Value</span><b>${money(totalContract)}</b><small>${jobs.length} total jobs</small></div>
+  <div class="card metric-v2"><span>Outstanding A/R</span><b>${money(outstanding)}</b><small>${overdue.length} overdue invoice${overdue.length===1?'':'s'}</small></div>
+  <div class="card metric-v2"><span>Collected This Month</span><b>${money(collectedMonth)}</b><small>${money(paidTotal)} collected all time</small></div>
+  <div class="card metric-v2"><span>Gross Profit</span><b>${money(grossProfit)}</b><small>${grossMargin.toFixed(1)}% gross margin</small></div>
+ </div>
+ <div class="v77-intel-grid">
+  <section class="card v77-panel"><div class="section-head"><div><div class="eyebrow">SALES PIPELINE</div><h2>Where the Work Is</h2><p>${pipelineJobs.length} active opportunities · ${money(pipelineValue)} currently in lead/estimate</p></div><button data-tab="estimates" class="btn">Estimates →</button></div>
+   <div class="v77-pipeline">${pipelineStages.map(([key,label])=>{const list=jobs.filter(j=>j.status===key);const value=list.reduce((a,j)=>a+Number(j.contract_amount||0),0);return `<button class="v77-stage ${list.length?'has-data':''}" data-tab="jobs"><b>${list.length}</b><span>${label}</span><small>${money(value)}</small></button>`}).join('')}</div>
+   <div class="v77-booked"><div><span>Booked / production value</span><b>${money(bookedValue)}</b></div><div><span>In production</span><b>${inProgress.length} job${inProgress.length===1?'':'s'}</b></div><div><span>Active jobs</span><b>${active.length}</b></div></div>
+  </section>
+  <section class="card v77-panel"><div class="section-head"><div><div class="eyebrow">CASH & BILLING</div><h2>Money Snapshot</h2></div><button data-tab="financial" class="btn">Financials →</button></div>
+   <div class="v77-money-list"><div><span>Total invoiced</span><b>${money(invoicedTotal)}</b></div><div><span>Collected</span><b>${money(paidTotal)}</b></div><div><span>Outstanding</span><b>${money(outstanding)}</b></div><div><span>Overdue</span><b>${money(overdue.reduce((a,i)=>a+Math.max(0,Number(i.total||0)-(paidByInvoice[i.id]||0)),0))}</b></div></div>
+  </section>
+ </div>
+ <div class="dashboard-grid">
+  <section class="card command-card"><div class="section-head"><div><div class="eyebrow">NEEDS YOUR ATTENTION</div><h2>Office To-Do</h2><p>Items coming back from the field or needing follow-up.</p></div></div><div class="attention-count">${attentionCount} ${attentionCount===1?'item':'items'} need attention</div><div class="attention-list">${attention.map(a=>`<button class="attention-item" ${a.kind?`data-attention-kind="${a.kind}" data-attention-id="${a.id}"`:a.tab?`data-tab="${a.tab}"`:''}><span class="attention-icon">${a.icon}</span><span><b>${esc(a.title)}</b><small>${esc(a.sub)}</small></span><strong>${esc(a.cta||'→')}</strong></button>`).join('')}</div></section>
+  <section class="card attention-card"><div class="section-head"><div><div class="eyebrow">OPERATIONS</div><h2>At a Glance</h2></div><button data-tab="schedule" class="btn">Schedule →</button></div><div class="glance-row"><span>Scheduled jobs</span><b>${scheduled.length}</b></div><div class="glance-row"><span>Open tasks</span><b>${openTasks.length}</b></div><div class="glance-row"><span>Material requests</span><b>${openMaterials.length}</b></div><div class="glance-row"><span>Overdue invoices</span><b>${overdue.length}</b></div></section>
+ </div>
+ <div class="v77-intel-grid">
+  <section class="card v77-panel"><div class="section-head"><div><div class="eyebrow">SCHEDULE</div><h2>Next Up</h2><p>Your next scheduled jobs.</p></div><button data-tab="schedule" class="btn">Full Schedule →</button></div>${upcoming.map(j=>`<button class="v77-list-row" data-job="${j.id}"><span class="v77-date">${dateFmt(j.scheduled_start)}</span><span><b>${esc(j.name)}</b><small>${esc(j.customers?.name||'No customer')} · ${statusLabel(j.status)}</small></span><strong>${money(j.contract_amount)}</strong></button>`).join('')||'<div class="empty">Nothing is scheduled yet.</div>'}</section>
+  <section class="card v77-panel"><div class="section-head"><div><div class="eyebrow">JOB INTELLIGENCE</div><h2>Profit Leaders</h2><p>Highest gross profit based on recorded costs.</p></div><button data-tab="financial" class="btn">View All →</button></div>${topJobs.map(r=>`<button class="v77-list-row" data-job="${r.j.id}"><span class="v77-rank">${topJobs.indexOf(r)+1}</span><span><b>${esc(r.j.name)}</b><small>${statusLabel(r.j.status)} · Cost ${money(r.cost)}</small></span><strong>${money(r.profit)}<small>${r.margin.toFixed(1)}% margin</small></strong></button>`).join('')||'<div class="empty">No priced jobs yet.</div>'}</section>
+ </div>
+ <div class="v77-intel-grid">
+  <section class="card v77-panel"><div class="section-head"><div><div class="eyebrow">BUDGET WATCH</div><h2>Jobs at Risk</h2><p>Jobs running more than 5% over estimated cost.</p></div></div>${atRisk.map(r=>`<button class="v77-list-row" data-job="${r.j.id}"><span class="v77-risk">!</span><span><b>${esc(r.j.name)}</b><small>${money(r.cost)} actual · ${money(r.est)} estimated</small></span><strong>${money(r.cost-r.est)}<small>over budget</small></strong></button>`).join('')||'<div class="empty">No jobs currently over the 5% watch threshold.</div>'}</section>
+  <section class="card v77-panel"><div class="section-head"><div><div class="eyebrow">FIELD PULSE</div><h2>Latest From the Field</h2><p>Recent reports and crew activity.</p></div><button data-tab="jobs" class="btn">Open Jobs →</button></div>${recentReports.map(r=>`<div class="v77-report"><div><b>${esc(state.jobs.find(j=>j.id===r.job_id)?.name||'Job')}</b><small>${esc(personName(r.submitted_by))} · ${dateTimeFmt(r.created_at||r.report_date)}</small></div><span>${Number(r.hours||0).toFixed(2)} hrs</span><p>${esc(r.notes||'No notes')}</p></div>`).join('')||'<div class="empty">No field reports yet.</div>'}</section>
+ </div>
+ <section class="card recent-card"><div class="section-head"><div><div class="eyebrow">RECENT JOBS</div><h2>Jobs</h2></div><button data-tab="jobs" class="btn">All Jobs →</button></div>${jobList(recent)}</section>
+ </div>`;
+}
+function jobList(list,fieldMode=false){
+ return `<div class="list">${list.length?list.map(j=>`<div class="job">
+ <div class="row"><div style="min-width:0"><b>${esc(j.job_number)} · ${esc(j.name)}</b><div class="sub">${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</div>
+ <div class="sub">${j.scheduled_start?`Scheduled ${dateFmt(j.scheduled_start)}`:"Not scheduled"}${!fieldMode && j.contract_amount!=null?" · "+money(j.contract_amount):""}</div></div><button class="btn" data-job="${j.id}">Open</button></div>
+ </div>`).join(""):`<div class="empty">No jobs yet.</div>`}</div>`;
+}
+
+function customers(){
+ const q=state.customerSearch.trim().toLowerCase();
+ const list=state.customers.filter(c=>!q||[c.name,c.company,c.phone,c.email].some(v=>String(v||'').toLowerCase().includes(q)));
+ return `<div class="card"><div class="row"><div><h2>Customers</h2><div class="sub">${state.customers.length} customers · click a customer to open their account</div></div><button id="newCustomer" class="btn primary">+ Customer</button></div>
+ <input id="customerSearch" class="search-input" value="${esc(state.customerSearch)}" placeholder="Search customers, companies, phone or email…" style="margin:14px 0">
+ <div class="customer-grid">${customerGridMarkup()}</div></div>`;
+}
+
+function jobs(){
+ const groups=["lead","estimate","approved","scheduled","in_progress","punch_list","complete","invoiced","paid","closed"];
+ const field=isFieldUser();
+ return `<div class="card"><div class="row"><div><h2>Jobs</h2><div class="sub">${field?"Jobs assigned to you":state.jobs.length+" total jobs"}</div></div>${field?"":`<button id="newJob" class="btn primary">+ New Job</button>`}</div>
+ <div class="job-filters">${groups.map(s=>`<button class="pill ${state.jobs.some(j=>j.status===s)?"active":""}" data-filter="${s}">${statusLabel(s)} (${state.jobs.filter(j=>j.status===s).length})</button>`).join("")}</div>
+ <div id="jobResults">${jobList(state.jobs,field)}</div></div>`;
+}
+
+
+function localDateKey(d){
+ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0");
+ return `${y}-${m}-${day}`;
+}
+function scheduleLocalInput(v, fallbackHour=8){
+ const d=v?new Date(v):new Date();
+ if(!v||Number.isNaN(d.getTime())) d.setHours(fallbackHour,0,0,0);
+ const y=d.getFullYear(),m=String(d.getMonth()+1).padStart(2,"0"),day=String(d.getDate()).padStart(2,"0"),h=String(d.getHours()).padStart(2,"0"),min=String(d.getMinutes()).padStart(2,"0");
+ return `${y}-${m}-${day}T${h}:${min}`;
+}
+function scheduleRange(j){
+ if(!j?.scheduled_start)return "Unscheduled";
+ const s=new Date(j.scheduled_start), e=j.scheduled_end?new Date(j.scheduled_end):null;
+ if(Number.isNaN(s.getTime()))return "Unscheduled";
+ const day=s.toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+ const st=s.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+ if(!e||Number.isNaN(e.getTime()))return `${day} · ${st}`;
+ const et=e.toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"});
+ return `${day} · ${st}–${et}`;
+}
+function scheduledHours(j){
+ if(!j?.scheduled_start||!j?.scheduled_end)return 0;
+ const mins=(new Date(j.scheduled_end)-new Date(j.scheduled_start))/60000;
+ return Math.max(0,mins/60);
+}
+function crewForJob(jobId){
+ return (state.allJobMembers||[]).filter(m=>m.job_id===jobId).map(m=>m.profiles?.full_name||personName(m.profile_id)).filter(Boolean);
+}
+function crewIdsForJob(jobId){return (state.allJobMembers||[]).filter(m=>m.job_id===jobId).map(m=>m.profile_id)}
+function scheduleConflicts(job, start, end, excludeId=job?.id){
+ const a=new Date(start).getTime(),b=new Date(end).getTime(); if(!Number.isFinite(a)||!Number.isFinite(b)||b<=a)return [];
+ const crew=new Set(crewIdsForJob(job?.id));
+ if(!crew.size)return [];
+ return state.jobs.filter(x=>x.id!==excludeId&&x.scheduled_start&&x.scheduled_end&&new Date(x.scheduled_start)<b&&new Date(x.scheduled_end)>a&&crewIdsForJob(x.id).some(id=>crew.has(id)));
+}
+function schedule(){
+ const base=new Date();base.setHours(0,0,0,0);
+ const monday=new Date(base);monday.setDate(base.getDate()-((base.getDay()+6)%7)+(scheduleWeekOffset*7));
+ const days=Array.from({length:7},(_,i)=>{const d=new Date(monday);d.setDate(monday.getDate()+i);return d});
+ const today=localDateKey(base),weekStart=days[0],weekEnd=days[6];
+ const rangeLabel=`${weekStart.toLocaleDateString("en-US",{month:"short",day:"numeric"})} – ${weekEnd.toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}`;
+ const activeCrew=state.profiles.filter(p=>p.active&&p.role!=="customer");
+ const statuses=["approved","scheduled","in_progress","punch_list"];
+ const filteredJobs=state.jobs.filter(j=>{
+   if(!j.scheduled_start)return false;
+   if(scheduleStatusFilter!=="all"&&j.status!==scheduleStatusFilter)return false;
+   if(scheduleCrewFilter!=="all"&&!crewIdsForJob(j.id).includes(scheduleCrewFilter))return false;
+   return true;
+ });
+ const jobsFor=k=>filteredJobs.filter(j=>localDateKey(new Date(j.scheduled_start))===k).sort((a,b)=>new Date(a.scheduled_start)-new Date(b.scheduled_start));
+ const weekJobs=state.jobs.filter(j=>j.scheduled_start&&localDateKey(new Date(j.scheduled_start))>=localDateKey(weekStart)&&localDateKey(new Date(j.scheduled_start))<=localDateKey(weekEnd));
+ const bookedHours=weekJobs.reduce((a,j)=>a+scheduledHours(j),0);
+ const unscheduled=state.jobs.filter(j=>!j.scheduled_start&&["approved","scheduled","in_progress","punch_list"].includes(j.status));
+ const crewLoad=activeCrew.map(p=>{const hours=weekJobs.filter(j=>crewIdsForJob(j.id).includes(p.id)).reduce((a,j)=>a+scheduledHours(j),0);return {...p,hours}}).sort((a,b)=>b.hours-a.hours);
+ const jobCard=j=>{
+   const crew=crewForJob(j.id),hrs=scheduledHours(j),conflicts=scheduleConflicts(j,j.scheduled_start,j.scheduled_end,j.id);
+   const conflictNames=[...new Set(conflicts.flatMap(x=>crewForJob(x.id)))].filter(n=>crew.includes(n));
+   return `<button type="button" class="schedule-job-card${conflicts.length?' schedule-conflict':''}" draggable="true" data-schedule-drag="${j.id}" data-job="${j.id}" aria-label="Open ${esc(j.name)}">
+    <div class="schedule-job-top"><div><span class="schedule-job-number">${esc(j.job_number||"")}</span><b>${esc(j.name)}</b></div><span class="status-badge">${statusLabel(j.status)}</span></div>
+    <div class="sub">${esc(j.customers?.name||"No customer")}</div>
+    <div class="schedule-job-meta"><span>🕒 ${j.scheduled_start?new Date(j.scheduled_start).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"}):""}${j.scheduled_end?` – ${new Date(j.scheduled_end).toLocaleTimeString("en-US",{hour:"numeric",minute:"2-digit"})}`:""}</span><span>${hrs?hrs.toFixed(1)+" hrs":"Time TBD"}</span></div>
+    <div class="schedule-crew">${crew.length?crew.map(n=>`<span>${esc(n)}</span>`).join(""):'<span class="muted-chip">No crew assigned</span>'}</div>
+    ${conflicts.length?`<div class="schedule-conflict-note">⚠ Crew conflict${conflicts.length>1?'s':''}: ${esc(conflictNames.join(", ")||"overlap detected")}</div>`:""}
+   </button>`;
+ };
+ const loadLabel=p=>p.hours>40?'Overbooked':p.hours>=36?'Near capacity':'Available';
+ const loadClass=p=>p.hours>40?'over':p.hours>=36?'near':'ok';
+ return `<div class="schedule-page">
+ <div class="schedule-hero card"><div><div class="eyebrow">OPERATIONS</div><h1>Schedule</h1><p>Plan the week, see crew workload, and catch scheduling conflicts before they become a problem.</p></div><div class="schedule-hero-actions"><button class="btn" id="schedulePrev">← Prev</button><button class="btn" id="scheduleToday">Today</button><button class="btn" id="scheduleNext">Next →</button><button class="btn primary" id="scheduleNewJob">+ Schedule Job</button></div></div>
+ <div class="schedule-summary"><div class="card"><span>This Week</span><b>${esc(rangeLabel)}</b><small>${weekJobs.length} scheduled jobs</small></div><div class="card"><span>Booked Hours</span><b>${bookedHours.toFixed(1)}</b><small>Scheduled production hours</small></div><div class="card"><span>Needs Scheduling</span><b>${unscheduled.length}</b><small>Approved / active jobs</small></div><div class="card"><span>Today</span><b>${state.jobs.filter(j=>j.scheduled_start&&localDateKey(new Date(j.scheduled_start))===today).length}</b><small>Jobs on the board</small></div></div>
+ <div class="schedule-toolbar card"><div><b>Week of ${esc(rangeLabel)}</b><span class="sub">Drag jobs on desktop. Tap any job to edit its exact time.</span></div><div class="schedule-filters"><select id="scheduleCrewFilter"><option value="all">All Crew</option>${activeCrew.map(p=>`<option value="${p.id}" ${scheduleCrewFilter===p.id?'selected':''}>${esc(p.full_name)}</option>`).join("")}</select><select id="scheduleStatusFilter"><option value="all">All Active Statuses</option>${statuses.map(s=>`<option value="${s}" ${scheduleStatusFilter===s?'selected':''}>${statusLabel(s)}</option>`).join("")}</select></div></div>
+ <div class="schedule-board">${days.map(d=>{const k=localDateKey(d),list=jobsFor(k),isToday=k===today;return `<section class="schedule-day ${isToday?'today':''}" data-schedule-day="${k}"><div class="schedule-day-head"><div><b>${d.toLocaleDateString("en-US",{weekday:"short"})}</b><span>${d.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span></div><strong>${list.length} job${list.length===1?'':'s'}</strong></div><div class="schedule-drop-zone" data-schedule-day="${k}">${list.map(jobCard).join("")||'<div class="schedule-empty">Drop a job here<br><small>No jobs scheduled</small></div>'}</div></section>`}).join("")}</div>
+ <div class="schedule-lower"><section class="card"><div class="section-head"><div><div class="eyebrow">CREW LOAD</div><h2>This Week</h2></div><span class="sub">40 hr capacity</span></div>${crewLoad.map(p=>`<div class="crew-load-row ${loadClass(p)}"><div class="crew-load-person"><b>${esc(p.full_name)}</b><span>${statusLabel(p.role)}</span></div><div class="crew-load-track"><div class="crew-load-bar"><i style="width:${Math.min(100,(p.hours/40)*100)}%"></i></div><small>${p.hours.toFixed(1)} / 40 hrs</small></div><strong>${loadLabel(p)}</strong></div>`).join("")||'<div class="empty">No active employees yet.</div>'}</section><section class="card"><div class="section-head"><div><div class="eyebrow">QUEUE</div><h2>Needs Scheduling</h2></div><span class="sub">${unscheduled.length} jobs</span></div>${unscheduled.slice(0,10).map(j=>`<div class="schedule-queue-row"><div><b>${esc(j.job_number||"")} · ${esc(j.name)}</b><span>${esc(j.customers?.name||"No customer")} · ${statusLabel(j.status)}</span></div><button class="btn" data-schedule-quick="${j.id}">Schedule</button></div>`).join("")||'<div class="empty">Nothing is waiting to be scheduled.</div>'}</section></div>
+ </div>`;
+}
+
+function team(){
+ const active=state.profiles.filter(p=>p.active).length;
+ return `<div class="card"><div class="row"><div><h2>Team</h2><div class="sub">${active} active · ${state.profiles.length} total employees</div></div><button id="newEmployee" class="btn primary">+ Employee</button></div>
+ <div class="list" style="margin-top:14px">${state.profiles.map(p=>`<div class="job"><div class="row"><div><b>${esc(p.full_name)}</b><div class="sub">${esc(p.role||"employee")} ${p.email?"· "+esc(p.email):""}</div>${p.phone?`<div class="sub">${esc(p.phone)}</div>`:""}</div><div style="text-align:right"><span class="pill ${p.active?"active":""}">${p.active?"Active":"Inactive"}</span><button class="btn" data-employee="${p.id}" style="margin-left:6px">Manage</button></div></div></div>`).join("")||`<div class="empty">No employees yet.</div>`}</div></div>
+ <div class="card" style="margin-top:14px"><h3>Employee access</h3><p class="sub">New employees get a Nolan Electric login. The app never stores employee passwords in the database.</p></div>`;
+}
+
+function employeeForm(p){
+ const roles=["employee","crew_lead","manager","admin"];
+ modalForm(p?"Manage Employee":"Add Employee",`<form class="form">
+ <input name="full_name" value="${esc(p?.full_name||"")}" placeholder="Full name" required>
+ <input name="email" type="email" value="${esc(p?.email||"")}" placeholder="Email address" ${p?"readonly":"required"}>
+ <input name="phone" value="${esc(p?.phone||"")}" placeholder="Phone">
+ <select name="role">${roles.map(r=>`<option value="${r}" ${p?.role===r?"selected":""}>${statusLabel(r)}</option>`).join("")}</select>
+ ${p?`<input name="labor_cost_rate" type="number" min="0" step="0.01" value="${Number(state.employeeRates[p.id]||0)}" placeholder="Internal labor cost / hour"><div class="sub">Internal cost only — employee will never see this rate.</div>`:""}
+ ${p?`<label style="display:flex;align-items:center;gap:8px"><input name="active" type="checkbox" ${p.active?"checked":""}> Active employee</label>`:`<p class="sub">A temporary password will be generated for the employee. Give it to them securely, then have them change it after signing in.</p>`}
+ <button class="btn primary" type="submit">${p?"Save Changes":"Create Employee"}</button></form>`,async f=>{
+  if(p){
+   const r=await sb.functions.invoke("employee-admin",{body:{action:"update",id:p.id,full_name:formValue(f,"full_name"),phone:formValue(f,"phone"),role:formValue(f,"role"),active:formValue(f,"active")==="on"}});
+   if(!r.error && r.data?.error) return {error:new Error(r.data.error)};
+   if(r.error) return r;
+   const rate=Number(formValue(f,"labor_cost_rate")||0);
+   const rr=await sb.from("employee_labor_rates").upsert({profile_id:p.id,labor_cost_rate:rate,updated_at:new Date().toISOString()});
+   if(rr.error) return rr;
+   return r;
+  }
+  const r=await sb.functions.invoke("employee-admin",{body:{action:"create",full_name:formValue(f,"full_name"),email:formValue(f,"email"),phone:formValue(f,"phone"),role:formValue(f,"role")}});
+  if(!r.error && r.data?.error) return {error:new Error(r.data.error)};
+  if(!r.error && r.data?.temporary_password) toast(`Employee created.\n\nEmail: ${r.data.email}\nTemporary password: ${r.data.temporary_password}\n\nGive this to the employee securely. They should change it after signing in.`);
+  return r;
+ });
+}
+
+function financial(){
+ const jobs=state.jobs;
+ const totalContract=jobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
+ const totalEstLabor=jobs.reduce((a,j)=>a+Number(j.estimated_labor_cost||0),0);
+ const totalEstMat=jobs.reduce((a,j)=>a+Number(j.estimated_material_cost||0),0);
+ const totalEstOther=jobs.reduce((a,j)=>a+Number(j.estimated_other_cost||0),0);
+ const totalEstCost=totalEstLabor+totalEstMat+totalEstOther;
+ const laborByJob={};
+ (state.companyTimeEntries||[]).forEach(t=>{
+  const rate=Number(state.employeeRates?.[t.profile_id]||0);
+  laborByJob[t.job_id]=(laborByJob[t.job_id]||0)+(Number(t.duration_minutes||0)/60)*rate;
+ });
+ const costsByJob={};
+ (state.companyJobCosts||[]).forEach(c=>{
+  if(!costsByJob[c.job_id]) costsByJob[c.job_id]={material:0,other:0,total:0};
+  const amt=Number(c.amount||0);
+  costsByJob[c.job_id].total+=amt;
+  if(c.cost_type==="material") costsByJob[c.job_id].material+=amt; else costsByJob[c.job_id].other+=amt;
+ });
+ const rows=jobs.map(j=>{
+  const labor=laborByJob[j.id]||0;
+  const c=costsByJob[j.id]||{material:0,other:0,total:0};
+  const cost=labor+c.total;
+  const est=Number(j.estimated_labor_cost||0)+Number(j.estimated_material_cost||0)+Number(j.estimated_other_cost||0);
+  const profit=Number(j.contract_amount||0)-cost;
+  const margin=Number(j.contract_amount||0)?profit/Number(j.contract_amount)*100:0;
+  const budget=budgetState(est,cost);
+  return {j,labor,material:c.material,other:c.other,cost,est,profit,margin,budget};
+ }).sort((a,b)=>b.profit-a.profit);
+ const actualLabor=rows.reduce((a,r)=>a+r.labor,0);
+ const actualMaterials=rows.reduce((a,r)=>a+r.material,0);
+ const actualOther=rows.reduce((a,r)=>a+r.other,0);
+ const actualCost=actualLabor+actualMaterials+actualOther;
+ const grossProfit=totalContract-actualCost;
+ const margin=totalContract?grossProfit/totalContract*100:0;
+ const profitable=rows.filter(r=>r.profit>=0).length;
+ const budgets=rows.reduce((a,r)=>{a[r.budget.label]=(a[r.budget.label]||0)+1;return a;},{});
+ return `<div class="grid">
+ <div class="card metric"><span>Contract Value</span><b>${money(totalContract)}</b></div>
+ <div class="card metric"><span>Est. Total Cost</span><b>${money(totalEstCost)}</b></div>
+ <div class="card metric"><span>Actual Costs</span><b>${money(actualCost)}</b></div>
+ <div class="card metric"><span>Gross Profit</span><b>${money(grossProfit)}</b></div>
+ <div class="card metric"><span>Gross Margin</span><b>${margin.toFixed(1)}%</b></div>
+ <div class="card metric"><span>Profitable Jobs</span><b>${profitable}/${rows.length}</b></div></div>
+ <div class="card" style="margin-top:14px"><h3>Budget Watch</h3><div class="sub">Actual cost compared with each job's estimated total cost.</div>
+ <div class="pipeline" style="margin-top:12px"><div><b>${budgets["On Budget"]||0}</b><span>On Budget</span></div><div><b>${budgets["Watch"]||0}</b><span>Watch</span></div><div><b>${budgets["Over budget"]||0}</b><span>Over Budget</span></div></div></div>
+ <div class="card" style="margin-top:14px"><h2>Job Profitability</h2><div class="sub">Actual labor + material + other costs compared with contract value.</div>
+ <div class="list" style="margin-top:14px">${rows.length?rows.map(r=>`<div class="job"><div class="row"><div style="min-width:0"><b>${esc(r.j.job_number)} · ${esc(r.j.name)}</b><div class="sub">${esc(r.j.customers?.name||"No customer")} · ${statusLabel(r.j.status)}</div><div class="sub">Labor ${money(r.labor)} · Materials ${money(r.material)} · Other ${money(r.other)}</div><div class="sub">Budget: ${r.est?money(r.est):"Not set"} · ${r.budget.label}${r.est?" · Variance "+money(r.budget.variance):""}</div><div class="sub">Est. Profit ${r.est?money(Number(r.j.contract_amount||0)-r.est):"—"} · Est. Margin ${r.est&&Number(r.j.contract_amount||0)?((Number(r.j.contract_amount||0)-r.est)/Number(r.j.contract_amount)*100).toFixed(1)+"%":"—"}</div></div><div style="text-align:right"><b>${money(r.profit)}</b><div class="sub">${r.margin.toFixed(1)}% margin</div><div class="sub">Cost ${money(r.cost)}</div></div></div></div>`).join(''):`<div class="empty">No jobs yet.</div>`}</div></div>
+ <div class="card" style="margin-top:14px"><h3>Estimates vs. Actuals</h3><div class="sub">Estimated labor ${money(totalEstLabor)} · Estimated materials ${money(totalEstMat)} · Estimated other ${money(totalEstOther)} · Estimated total ${money(totalEstCost)} · Actual costs ${money(actualCost)}</div></div>`;
+}
+function laborWeekBounds(offset=0){
+ const now=new Date(); now.setHours(0,0,0,0); const day=now.getDay(); const diff=day===0?-6:1-day; const start=new Date(now); start.setDate(now.getDate()+diff+(offset*7)); const end=new Date(start); end.setDate(start.getDate()+7); return {start,end};
+}
+function laborPayroll(){
+ const {start,end}=laborWeekBounds(state.laborWeekOffset||0); const entries=(state.companyTimeEntries||[]).filter(t=>{const d=new Date(t.started_at);return d>=start&&d<end});
+ const employees=(state.profiles||[]).filter(p=>p.role!=='customer').sort((a,b)=>String(a.full_name||'').localeCompare(String(b.full_name||'')));
+ const byEmp={}; employees.forEach(p=>byEmp[p.id]={p,hours:0,regular:0,ot:0,cost:0});
+ entries.forEach(t=>{const x=byEmp[t.profile_id];if(!x)return; x.hours+=Number(t.duration_minutes||0)/60;});
+ Object.values(byEmp).forEach(x=>{x.regular=Math.min(40,x.hours);x.ot=Math.max(0,x.hours-40);x.cost=x.hours*Number(state.employeeRates?.[x.p.id]||0);});
+ const totalHours=entries.reduce((a,t)=>a+Number(t.duration_minutes||0)/60,0), totalOT=Object.values(byEmp).reduce((a,x)=>a+x.ot,0), totalCost=Object.values(byEmp).reduce((a,x)=>a+x.cost,0);
+ const approved=entries.filter(t=>t.approved_at).length, pending=entries.length-approved;
+ const weekLabel=`${start.toLocaleDateString('en-US',{month:'short',day:'numeric'})} – ${new Date(end.getTime()-86400000).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}`;
+ const jobName=t=>{const j=state.jobs.find(x=>x.id===t.job_id);return j?`${j.job_number||''} · ${j.name}`:'Job';};
+ const rows=employees.map(x=>{const pct=Math.min(100,(x.hours/40)*100);const status=x.hours>40?'Overtime':x.hours>=36?'Near capacity':'On track';return `<div class="labor-employee-row"><div><b>${esc(x.p.full_name||'Employee')}</b><span>${esc(x.p.role||'')}</span></div><div class="labor-hours"><b>${x.hours.toFixed(2)} hrs</b><small>${x.regular.toFixed(2)} regular · ${x.ot.toFixed(2)} OT</small><div class="labor-bar"><i style="width:${pct}%"></i></div></div><div class="labor-status ${x.hours>40?'over':x.hours>=36?'near':''}">${status}</div><div class="labor-cost">${money(x.cost)}<small>internal labor cost</small></div></div>`}).join('')||'<div class="empty">No employees found.</div>';
+ const entryRows=entries.map(t=>{const p=state.profiles.find(x=>x.id===t.profile_id);const h=Number(t.duration_minutes||0)/60;return `<div class="labor-entry-row"><div><b>${esc(p?.full_name||'Employee')}</b><span>${esc(jobName(t))}</span><small>${new Date(t.started_at).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})} · ${new Date(t.started_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</small></div><strong>${h.toFixed(2)}h</strong><span class="${t.approved_at?'approved-chip':'pending-chip'}">${t.approved_at?'Approved':'Needs Review'}</span><button class="btn small" data-labor-entry="${t.id}">${t.approved_at?'View':'Review'}</button></div>`}).join('')||'<div class="empty">No time entries for this week.</div>';
+ return `<div class="page-heading"><div><div class="eyebrow">OPERATIONS</div><h1>Labor & Payroll</h1><p>Review field hours, labor cost, overtime and payroll-ready time.</p></div><div class="page-heading-actions"><button class="btn" id="laborPrev">← Prev Week</button><button class="btn" id="laborToday">This Week</button><button class="btn" id="laborNext">Next Week →</button><button class="btn primary" id="addManualHours">+ Add Hours</button></div></div>
+ <div class="labor-week-banner"><b>${weekLabel}</b><span>${entries.length} time entries · ${pending} needing review</span></div>
+ <div class="metric-grid"><div class="card metric-v2"><span>Total Hours</span><b>${totalHours.toFixed(1)}</b><small>${approved} approved entries</small></div><div class="card metric-v2"><span>Overtime</span><b>${totalOT.toFixed(1)}</b><small>hours over 40 / employee</small></div><div class="card metric-v2"><span>Labor Cost</span><b>${money(totalCost)}</b><small>using internal labor rates</small></div><div class="card metric-v2"><span>Review Queue</span><b>${pending}</b><small>${pending?'entries need approval':'all entries approved'}</small></div></div>
+ <section class="card labor-card"><div class="section-head"><div><div class="eyebrow">CREW LABOR</div><h2>Weekly Labor Summary</h2><p class="sub">40 hours is the standard weekly threshold used for the overtime view.</p></div></div>${rows}</section>
+ <section class="card labor-card"><div class="section-head"><div><div class="eyebrow">TIMESHEET REVIEW</div><h2>Time Entries</h2><p class="sub">Review individual entries before treating the week as payroll-ready.</p></div><button class="btn" id="approveLaborWeek" ${pending?'':'disabled'}>${pending?'Approve All This Week':'All Approved'}</button></div>${entryRows}</section>
+ <section class="card labor-note"><b>Payroll note</b><p>This screen is a payroll-ready hours and internal labor-cost tool. It does not calculate taxes, deductions, benefits or payroll filings.</p></section>`;
+}
+
+function reports(){
+ const contract=state.jobs.reduce((a,j)=>a+Number(j.contract_amount||0),0);
+ const invoiced=state.invoices.reduce((a,i)=>a+Number(i.total||0),0);
+ const paid=state.payments.reduce((a,p)=>a+Number(p.amount||0),0);
+ const hours=state.companyTimeEntries.reduce((a,t)=>a+Number(t.duration_minutes||0)/60,0);
+ const material=state.companyJobCosts.filter(c=>c.cost_type==='material').reduce((a,c)=>a+Number(c.amount||0),0);
