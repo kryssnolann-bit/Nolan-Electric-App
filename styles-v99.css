@@ -362,3 +362,10 @@ button{min-width:0;overflow-wrap:break-word;-webkit-tap-highlight-color:transpar
 
 /* V99 ASK NOLAN */
 .ask-page{max-width:1100px;margin:0 auto}.ask-hero{display:flex;align-items:center;gap:16px;padding:20px;margin-bottom:14px;border-top:4px solid #111}.ask-mark{width:52px;height:52px;border-radius:14px;background:#111;color:#fff;display:grid;place-items:center;font-size:26px;font-weight:900}.ask-hero h2{margin:0 0 5px}.ask-hero p{margin:0;color:#666;line-height:1.45}.ask-box{padding:18px}.ask-box form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px}.ask-box textarea{min-height:64px;resize:vertical}.ask-suggestions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.ask-suggestions .btn{font-size:11px}.ask-answer{padding:20px;margin-top:14px}.ask-answer h2{margin:5px 0}.ask-summary{font-size:17px;line-height:1.5;color:#444}.ask-list{display:grid;gap:8px;margin:15px 0}.ask-list>div{display:flex;justify-content:space-between;gap:15px;padding:12px;border:1px solid #e3e3e3;border-radius:11px}.ask-list b{min-width:0}.ask-list span{color:#666;text-align:right}.ask-nolan-denied{max-width:700px;margin:0 auto;padding:22px}.ask-nolan-denied h1{margin:4px 0 8px}@media(max-width:700px){.ask-box form{grid-template-columns:1fr}.ask-box form .btn{width:100%;min-height:44px}.ask-list>div{display:block}.ask-list span{display:block;text-align:left;margin-top:4px}.ask-hero{padding:15px}.ask-mark{width:44px;height:44px}}
+
+/* V99.1 Ask Nolan mascot */
+.ask-mark{overflow:hidden;border-radius:50%;width:92px;height:92px;min-width:92px;background:#111;display:flex;align-items:center;justify-content:center;border:3px solid #f4c400;box-shadow:0 6px 18px rgba(0,0,0,.12)}
+.ask-mark img{width:100%;height:100%;object-fit:cover;display:block}
+.ask-suggestions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ask-suggestions .btn{white-space:normal;min-height:58px;text-align:left}
+@media(max-width:600px){.ask-suggestions{grid-template-columns:1fr}.ask-mark{width:82px;height:82px;min-width:82px}}
