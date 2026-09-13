@@ -595,17 +595,26 @@ function field(){
 }
 
 async function toggleFieldTimer(jobId){
- if(!session?.user?.id||!isFieldUser())return;
- const active=state.timeEntries.find(x=>x.profile_id===session.user.id&&!x.ended_at);
+ if(!session?.user?.id||!isFieldUser()||!jobId)return;
+ // Re-read the active timer from Supabase so the field button never depends on stale page state.
+ const activeQuery=await sb.from('time_entries').select('id,job_id,started_at').eq('profile_id',session.user.id).is('ended_at',null).order('started_at',{ascending:false}).limit(1).maybeSingle();
+ if(activeQuery.error){toast('Could not check the active timer: '+activeQuery.error.message);return;}
+ const active=activeQuery.data||null;
  if(active){
   if(active.job_id!==jobId){const activeJob=state.jobs.find(j=>j.id===active.job_id);toast(`Stop ${activeJob?.name||'your current job'} before starting another timer.`);return;}
   const ended=new Date();const mins=Math.max(1,Math.round((ended-new Date(active.started_at))/60000));
-  const r=await sb.from('time_entries').update({ended_at:ended.toISOString(),duration_minutes:mins}).eq('id',active.id);
-  if(r.error)toast(r.error.message);else{await logJobActivity(jobId,'time_entry',`Stopped timer after ${(mins/60).toFixed(2)} hours.`);await load();}
+  const r=await sb.from('time_entries').update({ended_at:ended.toISOString(),duration_minutes:mins}).eq('id',active.id).eq('profile_id',session.user.id).select('id').maybeSingle();
+  if(r.error){toast('Could not stop the job timer: '+r.error.message);return;}
+  await logJobActivity(jobId,'time_entry',`Stopped timer after ${(mins/60).toFixed(2)} hours.`);
+  toast('Job timer stopped.');
+  await load();
   return;
  }
  const r=await sb.from('time_entries').insert({job_id:jobId,profile_id:session.user.id,started_at:new Date().toISOString()}).select().single();
- if(r.error)toast(r.error.message);else{await logJobActivity(jobId,'time_entry','Started job timer.');await load();}
+ if(r.error){toast('Could not start the job timer: '+r.error.message);return;}
+ await logJobActivity(jobId,'time_entry','Started job timer.');
+ toast('Job timer started.');
+ await load();
 }
 
 function entryMinutes(x){
