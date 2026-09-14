@@ -1533,12 +1533,17 @@ function globalSearch(){navigate({type:'search',q:''});}
 document.addEventListener('submit',e=>{if(e.target.id==='globalSearchForm'){e.preventDefault();navigate({type:'search',q:formValue(e.target,'q')||''});}});
 document.addEventListener('keydown',e=>{if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();globalSearch();}});
 
+window.__NOLAN_APP_LOADED__=true;
 (async()=>{
  try{
-  if(!createClient){fatalBoot("Supabase library did not load.","The Supabase CDN script could not be loaded.");return}
-  if(!cfg.supabaseUrl || !cfg.supabaseKey || String(cfg.supabaseKey).includes("PASTE_")){fatalBoot("Supabase configuration is missing.","Keep your existing config.js in the GitHub repository. V59 does not replace or include your private configuration file.");return}
+  if(!createClient){fatalBoot("Supabase library did not load.","The Supabase CDN script could not be loaded. Check your internet connection or the Supabase script in index.html.");return}
+  if(!cfg.supabaseUrl || !cfg.supabaseKey || String(cfg.supabaseKey).includes("PASTE_")){fatalBoot("Supabase configuration is missing.","Keep your existing config.js in the GitHub repository. V106 does not replace or include your private configuration file.");return}
   sb=createClient(cfg.supabaseUrl,cfg.supabaseKey);
- const {data}=await sb.auth.getSession();session=data.session;
+  const sessionResult=await Promise.race([
+   sb.auth.getSession(),
+   new Promise((_,reject)=>setTimeout(()=>reject(new Error("Supabase session check timed out after 12 seconds.")),12000))
+  ]);
+  const {data}=sessionResult;session=data.session;
  if(session){const {data:p}=await sb.from("profiles").select("*").eq("id",session.user.id).maybeSingle();profile=p;normalizeTab()}
  if(!history.state?.nolanPage) history.replaceState({nolanPage:state.page},"",location.hash||"#"+state.page.tab);
   render();if(session){load();registerPushServiceWorker().then(reg=>reg&&claimPushSubscription());}
