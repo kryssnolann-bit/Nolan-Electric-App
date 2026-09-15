@@ -240,7 +240,7 @@ function appShell(){
  return `<div class="app-shell">
  <header class="app-header">
   <div class="brand-lockup"><img src="nolan-logo-transparent.png" class="brand-logo" alt="Nolan Electric"><div><div class="brand-title">Nolan Electric</div><div class="brand-subtitle">JOB COMMAND CENTER</div><div class="brand-tagline">PLAN <i>•</i> TRACK <i>•</i> BUILD <i>•</i> SUCCEED</div></div></div>
-  <div class="header-tools"><button class="search-chip" id="globalSearch" aria-label="Search Nolan Electric"><span class="search-icon">⌕</span><span>Search jobs, customers...</span><kbd>⌘K</kbd></button><button class="notification-bell" id="openNotifications" aria-label="Notifications"><span>🔔</span>${notificationCount()?`<b>${notificationCount()>99?"99+":notificationCount()}</b>`:""}</button><button class="header-ask" data-tab="ask">Ask Nolan</button><div class="user-chip"><b>${esc(profile?.full_name||"User")}</b><span>${esc(profile?.role||"")}</span></div><button id="logout" class="btn header-signout">Sign Out</button></div>
+  <div class="header-tools"><button class="search-chip" id="globalSearch" aria-label="Search Nolan Electric"><span class="search-icon">⌕</span><span>Search jobs, customers...</span><kbd>⌘K</kbd></button><button class="notification-bell" id="openNotifications" aria-label="Notifications"><span>🔔</span>${notificationCount()?`<b>${notificationCount()>99?"99+":notificationCount()}</b>`:""}</button><button class="header-account" id="openAccount" aria-label="Account and sign out"><span>${esc((profile?.full_name||"U").trim().charAt(0).toUpperCase())}</span></button><button class="header-ask" data-tab="ask">Ask Nolan</button><div class="user-chip"><b>${esc(profile?.full_name||"User")}</b><span>${esc(profile?.role||"")}</span></div><button id="logout" class="btn header-signout">Sign Out</button></div>
  </header>
  <div class="app-layout">
   <aside class="sidebar"><div class="sidebar-brand">NOLAN ELECTRIC <small>COMMAND CENTER</small></div>
@@ -1060,6 +1060,7 @@ document.addEventListener("click",async e=>{
  if(clickId(e)==="backButton"||clickId(e)==="backButton2"){goBack();return}
  if(clickId(e)==='globalSearch'){navigate({type:'search',q:''});return}
  if(clickId(e)==='mobileMore'){openMobileMore();return}
+ if(clickId(e)==='openAccount'){openMobileAccount();return}
  if(clickId(e)==='newEstimatePage'){if(!isFieldUser())navigate({type:'estimate',id:'new'});return}
  const estOpen=e.target.closest('[data-estimate-open]');if(estOpen){if(!isFieldUser())navigate({type:'estimate',id:estOpen.dataset.estimateOpen});return}
  if(clickId(e)==='printEstimatePage'){const page=currentPage();const est=state.estimates.find(x=>x.id===page.id);const j=est&&state.jobs.find(x=>x.id===est.job_id);if(est&&j)printEstimate(est,j,state.estimateItems.filter(x=>x.estimate_id===est.id));return}
