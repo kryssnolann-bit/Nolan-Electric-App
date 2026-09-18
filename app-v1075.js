@@ -1335,14 +1335,46 @@ document.addEventListener("change",e=>{
 
 document.addEventListener("click",e=>{
  if(e.target?.id==="nolanAttach"){const w=document.createElement('div');w.className='nolan-attach-sheet';w.innerHTML=`<div class="nolan-attach-backdrop"></div><section class="nolan-attach-panel"><div class="nolan-attach-head"><div><div class="eyebrow">ATTACH TO NOLAN</div><h3>What do you want to show Nolan?</h3></div><button type="button" class="btn" id="closeNolanAttach">Close</button></div><button type="button" data-nolan-attach="camera">📷 <span><b>Take Photo</b><small>Use your camera</small></span></button><button type="button" data-nolan-attach="photo">🖼️ <span><b>Choose Photos</b><small>Pick from your phone</small></span></button><button type="button" data-nolan-attach="file">📎 <span><b>Upload Document</b><small>PDF, spreadsheet, text or document</small></span></button></section></div>`;document.body.appendChild(w);w.querySelector('#closeNolanAttach').onclick=()=>w.remove();w.querySelector('.nolan-attach-backdrop').onclick=()=>w.remove();w.querySelectorAll('[data-nolan-attach]').forEach(b=>b.onclick=()=>{const map={camera:'askNolanCamera',photo:'askNolanPhoto',file:'askNolanFile'};w.remove();document.getElementById(map[b.dataset.nolanAttach])?.click();});return;}
- const promptBtn=e.target.closest?.('[data-nolan-prompt]');if(promptBtn){const input=document.getElementById('askNolanInput');if(input){input.value=promptBtn.dataset.nolanPrompt;input.focus();input.dispatchEvent(new Event('input'));}}
+ const promptBtn=e.target.closest?.('[data-nolan-prompt]');if(promptBtn){const input=document.getElementById('askNolanInput');if(input&&!state.askNolanBusy){input.value=promptBtn.dataset.nolanPrompt;input.focus();document.getElementById('askNolanForm')?.requestSubmit();}}
  if(e.target?.dataset?.action==="remove-ask-photo"){state.askNolanImage=null;render();return;}
  if(e.target?.dataset?.action==="remove-ask-file"){state.askNolanFile=null;render();return;}
 });
 
 let fieldActionSubmitting=false;
 document.addEventListener("submit",async e=>{
- if(e.target.id==="askNolanForm"){e.preventDefault();const q=document.getElementById("askNolanInput")?.value?.trim()||"";if(!q)return;state.askNolanQuestion=q;state.askNolanBusy=true;state.askNolanError="";state.askNolanAI=null;const imageDataUrl=state.askNolanImage?.dataUrl||null;render();(async()=>{try{state.askNolanAI=await askNolanAI(q,imageDataUrl);}catch(err){console.error("Ask Nolan AI error",err);state.askNolanError=err?.message||"Ask Nolan could not answer right now.";}finally{state.askNolanBusy=false;render();setTimeout(()=>document.getElementById("askNolanInput")?.focus(),0);}})();return;}
+ if(e.target.id==="askNolanForm"){
+   e.preventDefault();
+   const form=e.target;
+   const input=form.querySelector("#askNolanInput");
+   const q=input?.value?.trim()||"";
+   if(!q||state.askNolanBusy)return;
+   const prior=(state.askNolanMessages||[]).slice(-8).map(m=>(m.role==="user"?"USER: ":"NOLAN: ")+String(m.text||"")).join("\n");
+   const imageDataUrl=state.askNolanImage?.dataUrl||null;
+   const fileDataUrl=state.askNolanFile?.dataUrl||null;
+   const fileName=state.askNolanFile?.name||null;
+   const attachmentName=state.askNolanImage?.name||state.askNolanFile?.name||null;
+   const fullQ=prior?`CONVERSATION SO FAR:\n${prior}\n\nCURRENT USER MESSAGE:\n${q}`:q;
+   state.askNolanMessages=[...(state.askNolanMessages||[]),{role:"user",text:q,attachment:attachmentName}];
+   state.askNolanQuestion=q;
+   state.askNolanBusy=true;
+   state.askNolanError="";
+   state.askNolanImage=null;
+   state.askNolanFile=null;
+   if(input)input.value="";
+   render();
+   try{
+     const ans=await askNolanAI(fullQ,imageDataUrl,fileDataUrl,fileName);
+     state.askNolanMessages=[...state.askNolanMessages,{role:"assistant",text:String(ans?.text||"Nolan returned an empty answer."),answer:ans}];
+   }catch(err){
+     console.error("Ask Nolan AI error",err);
+     state.askNolanError=err?.message||"Nolan could not answer right now.";
+   }finally{
+     state.askNolanBusy=false;
+     render();
+     setTimeout(()=>document.getElementById("askNolanInput")?.focus(),0);
+   }
+   return;
+ }
  if(e.target.id!=="fieldActionForm") return;
  e.preventDefault();
  if(fieldActionSubmitting) return;
