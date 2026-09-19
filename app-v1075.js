@@ -601,7 +601,7 @@ function askNolan(){
  const currentJob=state.selected?.name||state.selected?.job_number||'';
  return `<div class="nolan-chat-page"><header class="nolan-chat-header"><button class="nolan-back" data-tab="${field?'field':'dashboard'}" aria-label="Back">←</button><div class="nolan-title"><div class="nolan-title-mark">N</div><div><b>NOLAN</b><span>Your Electrical & ${field?'Field':'Business'} Assistant</span></div></div></header>
  <main class="nolan-chat-scroll">${!msgs.length?`<section class="nolan-welcome"><div class="nolan-welcome-avatar"><img src="ask-nolan-mascot.png" alt="Nolan"></div><div class="eyebrow">NOLAN ELECTRIC AI</div><h1>What are we working on?</h1><p>${field?'Ask Nolan anything about the electrical work in front of you. He can look at photos, help with the NEC, troubleshoot, and write your field documentation.':'Ask Nolan about the business, electrical work, jobs, or anything you need to think through.'}</p>${currentJob?`<div class="nolan-context-chip">🏗️ Current job · ${esc(currentJob)}</div>`:''}</section>`:''}${bubbles}${busy?`<div class="nolan-msg nolan-ai"><div class="nolan-ai-avatar"><img src="ask-nolan-mascot.png" alt="Nolan"></div><div class="nolan-bubble nolan-thinking"><span></span><span></span><span></span> Nolan is thinking…</div></div>`:''}${state.askNolanError?`<div class="nolan-error">${esc(state.askNolanError)}</div>`:''}</main>
- <section class="nolan-tools"><div class="nolan-quick-grid">${quick.map(([k,t,d])=>`<button type="button" class="nolan-quick" data-nolan-prompt="${esc(modePrompts[k])}"><b>${t}</b><span>${d}</span></button>`).join('')}</div></section>
+ ${!msgs.length?`<section class="nolan-tools"><div class="nolan-quick-grid">${quick.map(([k,t,d])=>`<button type="button" class="nolan-quick" data-nolan-prompt="${esc(modePrompts[k])}"><b>${t}</b><span>${d}</span></button>`).join('')}</div></section>`:''}
  <form id="askNolanForm" class="nolan-composer"><div class="nolan-attach-wrap"><button type="button" class="nolan-attach" id="nolanAttach" aria-label="Add attachment">＋</button></div><textarea id="askNolanInput" name="question" rows="1" placeholder="Ask Nolan anything…" required></textarea><button type="submit" class="nolan-send" ${busy?'disabled':''} aria-label="Send">➤</button><input id="askNolanCamera" type="file" accept="image/*" capture="environment" hidden><input id="askNolanPhoto" type="file" accept="image/*" hidden><input id="askNolanFile" type="file" accept="application/pdf,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx" hidden></form>
  ${img?`<div class="nolan-pending-attachment"><img src="${img.dataUrl}" alt="Photo ready to send"><span>${esc(img.name||'Photo')}</span><button type="button" data-action="remove-ask-photo">Remove</button></div>`:''}${file?`<div class="nolan-pending-attachment nolan-file"><span>📎 ${esc(file.name||'Attachment')}</span><button type="button" data-action="remove-ask-file">Remove</button></div>`:''}<div class="nolan-disclaimer">${field?'Field mode · company financials and business intelligence are not available to this account.':'Office mode · Nolan uses the live business data supplied by the Command Center when answering company questions.'}</div></div>`;
 }
@@ -1118,8 +1118,8 @@ document.addEventListener("click",async e=>{
  if(clickId(e)==='openEstimateCatalog'){openCatalogPicker();return}
  const editCat=e.target.closest('[data-edit-catalog]');if(editCat){openCatalogItem(state.estimatingCatalog.find(x=>x.id===editCat.dataset.editCatalog));return}
  if(clickId(e)==='addCatalogItem'){openCatalogItem();return}
- if(clickId(e)==='addEstimatePageLine'){const rows=document.getElementById('estimatePageRows');if(rows){const n=rows.querySelectorAll('.estimate-page-row').length;rows.insertAdjacentHTML('beforeend',estimateRow(n));updateEstimateTotals();}return}
- const remLine=e.target.closest('[data-remove-estimate-line]');if(remLine){const rows=document.querySelectorAll('.estimate-page-row');if(rows.length<=1){toast('Keep at least one line item.');return}remLine.closest('.estimate-page-row')?.remove();updateEstimateTotals();return}
+ if(clickId(e)==='addEstimatePageLine'){const rows=document.getElementById('estimatePageRows');if(rows){const n=rows.querySelectorAll('.estimate-page-row').length;rows.insertAdjacentHTML('beforeend',estimateRow(n));updateEstimateTotals();queueEstimateDraftSave();}return}
+ const remLine=e.target.closest('[data-remove-estimate-line]');if(remLine){const rows=document.querySelectorAll('.estimate-page-row');if(rows.length<=1){toast('Keep at least one line item.');return}remLine.closest('.estimate-page-row')?.remove();updateEstimateTotals();queueEstimateDraftSave();return}
 
  const cc=e.target.closest('[data-customer]');if(cc){navigate({type:"customer",id:cc.dataset.customer});return}
  if(clickId(e)==='addEstimateLine'){const rows=e.target.closest('.sheet')?.querySelector('#estimateRows');if(rows){const n=rows.querySelectorAll('.estimate-edit-row').length;rows.insertAdjacentHTML('beforeend',`<div class="estimate-edit-row"><input name="desc_${n}" placeholder="Description"><input name="qty_${n}" type="number" step=".01" value="1"><input name="price_${n}" type="number" step=".01" value="0"><input name="cat_${n}" value="Electrical"></div>`)}return}
@@ -1479,6 +1479,7 @@ document.addEventListener("drop",async e=>{const zone=e.target.closest("[data-sc
 document.addEventListener("keydown",e=>{if(e.target.id==="customerSearch"&&e.key==="Enter"){e.preventDefault();state.customerSearch=e.target.value;render();}});
 
 document.addEventListener("change",async e=>{
+ if(e.target.closest('#estimatePageForm')){queueEstimateDraftSave();}
  const ms=e.target.dataset.materialStatus;if(ms){const r=await sb.from('material_requests').update({status:e.target.value}).eq('id',ms);if(r.error)toast(r.error.message);else await load();return}
 
  const id=e.target.dataset.task;if(id){const checked=e.target.checked;const r=await sb.from("job_tasks").update({status:checked?"complete":"open",completed_at:checked?new Date().toISOString():null}).eq("id",id);if(r.error)toast(r.error.message);else{const t=state.tasks.find(x=>x.id===id);await logJobActivity(state.selected?.id,"task_update",`${checked?"Completed":"Reopened"} task: ${t?.title||"Task"}.`);}await load();return}
@@ -1486,7 +1487,7 @@ document.addEventListener("change",async e=>{
 });
 
 document.addEventListener("input",e=>{
- if(e.target.closest("#estimatePageForm") && (e.target.name||"").match(/^(qty_|price_|tax$)/)){updateEstimateTotals();}
+ if(e.target.closest("#estimatePageForm")){if((e.target.name||"").match(/^(qty_|price_|tax$)/))updateEstimateTotals();queueEstimateDraftSave();}
  if(e.target.id==="customerSearch"){state.customerSearch=e.target.value; const box=document.querySelector(".customer-grid"); if(box) box.innerHTML=customerGridMarkup();}
 });
 
@@ -1512,13 +1513,14 @@ document.addEventListener("submit",async e=>{
    const ir=await sb.from('estimate_items').insert(rows.map(x=>({...x,estimate_id:eid,unit_cost:0}))); if(ir.error)throw ir.error;
    if(payload.status==='approved') await sb.from('jobs').update({contract_amount:total,status:'approved'}).eq('id',jobId);
    state.estimates=[...(state.estimates||[])].filter(x=>x.id!==eid);state.estimates.push({...payload,id:eid});
-   toast('Estimate saved.');navigate({type:'tab',tab:'estimates'});
+   clearEstimateDraft(page);toast('Estimate saved.');navigate({type:'tab',tab:'estimates'});
   }catch(err){console.error(err);toast(err?.message||'Could not save estimate.');button.forEach(b=>{b.disabled=false;b.textContent='Save Estimate'});}
   return;
  }
  if(e.target.id==="login"){e.preventDefault();const {error}=await sb.auth.signInWithPassword({email:e.target.email.value,password:e.target.pw.value});if(error)toast(error.message)}
 });
 
+window.addEventListener('pagehide',()=>{const f=document.getElementById('estimatePageForm');if(f)saveEstimateDraft(f);});
 function updateEstimateTotals(){
  const form=document.getElementById('estimatePageForm');if(!form)return;
  const subtotal=[...form.querySelectorAll('.estimate-page-row')].reduce((a,r)=>a+Number(r.querySelector('[name^="qty_"]')?.value||0)*Number(r.querySelector('[name^="price_"]')?.value||0),0);
@@ -1528,7 +1530,7 @@ function updateEstimateTotals(){
 
 function estimateEditor(j){
  const existing=state.estimates.find(x=>x.job_id===j.id); const items=existing?state.estimateItems.filter(x=>x.estimate_id===existing.id):[]; const next='EST-'+new Date().getFullYear()+'-'+String(state.estimates.length+1).padStart(3,'0');
- modalForm(existing?'Edit Estimate':'Build Estimate',`<form class="form"><input name="estimate_number" value="${esc(existing?.estimate_number||next)}" required><select name="status"><option value="draft" ${!existing||existing.status==='draft'?'selected':''}>Draft</option><option value="sent" ${existing?.status==='sent'?'selected':''}>Sent</option><option value="approved" ${existing?.status==='approved'?'selected':''}>Approved</option><option value="rejected" ${existing?.status==='rejected'?'selected':''}>Rejected</option></select><div id="estimateRows">${items.map((it,i)=>`<div class="estimate-edit-row"><input name="desc_${i}" value="${esc(it.description)}" placeholder="Description" required><input name="qty_${i}" type="number" step=".01" value="${it.quantity}"><input name="price_${i}" type="number" step=".01" value="${it.sell_price}"><input name="cat_${i}" value="${esc(it.category||'General')}"></div>`).join('')||`<div class="estimate-edit-row"><input name="desc_0" placeholder="Description" required><input name="qty_0" type="number" step=".01" value="1"><input name="price_0" type="number" step=".01" value="${Number(j.contract_amount||0)}"><input name="cat_0" value="Electrical"></div>`}</div><button type="button" class="btn" id="addEstimateLine">+ Line Item</button><input name="tax" type="number" step=".01" value="${existing?.tax||0}" placeholder="Tax"><textarea name="notes" placeholder="Estimate notes / terms">${esc(existing?.notes||'')}</textarea><button class="btn primary" type="submit">Save Estimate</button></form>`,async f=>{let r;if(existing)r=await sb.from('estimates').update({estimate_number:formValue(f,'estimate_number'),status:formValue(f,'status'),tax:Number(formValue(f,'tax')||0),notes:formValue(f,'notes')||'',updated_at:new Date().toISOString()}).eq('id',existing.id).select().single();else r=await sb.from('estimates').insert({job_id:j.id,estimate_number:formValue(f,'estimate_number'),status:formValue(f,'status'),subtotal:0,tax:Number(formValue(f,'tax')||0),total:0,notes:formValue(f,'notes')||''}).select().single();if(r.error)return r;const eid=existing?.id||r.data.id;if(existing){const dr=await sb.from('estimate_items').delete().eq('estimate_id',eid);if(dr.error)return dr;}const entries=Object.keys(Object.fromEntries(f.entries())).map(k=>{const m=k.match(/^desc_(\d+)$/);return m&&m[1]}).filter(Boolean);const rows=entries.map(i=>({estimate_id:eid,description:String(formValue(f,'desc_'+i)||''),quantity:Number(formValue(f,'qty_'+i)||0),sell_price:Number(formValue(f,'price_'+i)||0),unit_cost:0,category:String(formValue(f,'cat_'+i)||'General')})).filter(x=>x.description&&x.quantity>0);if(rows.length){const ir=await sb.from('estimate_items').insert(rows);if(ir.error)return ir;}const subtotal=rows.reduce((a,x)=>a+x.quantity*x.sell_price,0),tax=Number(formValue(f,'tax')||0);return sb.from('estimates').update({subtotal,total:subtotal+tax,updated_at:new Date().toISOString()}).eq('id',eid)});
+ modalForm(existing?'Edit Estimate':'Build Estimate',`<form class="form"><input name="estimate_number" value="${esc(f.estimate_number||next)}" required><select name="status"><option value="draft" ${f.status==='draft'?'selected':''}>Draft</option><option value="sent" ${f.status==='sent'?'selected':''}>Sent</option><option value="approved" ${f.status==='approved'?'selected':''}>Approved</option><option value="rejected" ${f.status==='rejected'?'selected':''}>Rejected</option></select><div id="estimateRows">${items.map((it,i)=>`<div class="estimate-edit-row"><input name="desc_${i}" value="${esc(it.description)}" placeholder="Description" required><input name="qty_${i}" type="number" step=".01" value="${it.quantity}"><input name="price_${i}" type="number" step=".01" value="${it.sell_price}"><input name="cat_${i}" value="${esc(it.category||'General')}"></div>`).join('')||`<div class="estimate-edit-row"><input name="desc_0" placeholder="Description" required><input name="qty_0" type="number" step=".01" value="1"><input name="price_0" type="number" step=".01" value="${Number(j.contract_amount||0)}"><input name="cat_0" value="Electrical"></div>`}</div><button type="button" class="btn" id="addEstimateLine">+ Line Item</button><input name="tax" type="number" step=".01" value="${existing?.tax||0}" placeholder="Tax"><textarea name="notes" placeholder="Estimate notes / terms">${esc(existing?.notes||'')}</textarea><button class="btn primary" type="submit">Save Estimate</button></form>`,async f=>{let r;if(existing)r=await sb.from('estimates').update({estimate_number:formValue(f,'estimate_number'),status:formValue(f,'status'),tax:Number(formValue(f,'tax')||0),notes:formValue(f,'notes')||'',updated_at:new Date().toISOString()}).eq('id',existing.id).select().single();else r=await sb.from('estimates').insert({job_id:j.id,estimate_number:formValue(f,'estimate_number'),status:formValue(f,'status'),subtotal:0,tax:Number(formValue(f,'tax')||0),total:0,notes:formValue(f,'notes')||''}).select().single();if(r.error)return r;const eid=existing?.id||r.data.id;if(existing){const dr=await sb.from('estimate_items').delete().eq('estimate_id',eid);if(dr.error)return dr;}const entries=Object.keys(Object.fromEntries(f.entries())).map(k=>{const m=k.match(/^desc_(\d+)$/);return m&&m[1]}).filter(Boolean);const rows=entries.map(i=>({estimate_id:eid,description:String(formValue(f,'desc_'+i)||''),quantity:Number(formValue(f,'qty_'+i)||0),sell_price:Number(formValue(f,'price_'+i)||0),unit_cost:0,category:String(formValue(f,'cat_'+i)||'General')})).filter(x=>x.description&&x.quantity>0);if(rows.length){const ir=await sb.from('estimate_items').insert(rows);if(ir.error)return ir;}const subtotal=rows.reduce((a,x)=>a+x.quantity*x.sell_price,0),tax=Number(formValue(f,'tax')||0);return sb.from('estimates').update({subtotal,total:subtotal+tax,updated_at:new Date().toISOString()}).eq('id',eid)});
 }
 function recordPayment(inv){modalForm('Record Payment',`<form class="form"><p class="sub">Invoice ${esc(inv.invoice_number)} · ${money(inv.total)}</p><input name="amount" type="number" min=".01" step=".01" value="${inv.total}" required><input name="payment_date" type="date" value="${new Date().toISOString().slice(0,10)}"><select name="method"><option>Check</option><option>ACH</option><option>Card</option><option>Cash</option><option>Other</option></select><input name="reference" placeholder="Check # / confirmation"><textarea name="notes" placeholder="Notes"></textarea><button class="btn primary" type="submit">Record Payment</button></form>`,async f=>{const r=await sb.from('payments').insert({invoice_id:inv.id,amount:Number(formValue(f,'amount')||0),payment_date:formValue(f,'payment_date'),method:formValue(f,'method'),reference:formValue(f,'reference'),notes:formValue(f,'notes')});if(r.error)return r;const all=await sb.from('payments').select('amount').eq('invoice_id',inv.id);const sum=(all.data||[]).reduce((a,x)=>a+Number(x.amount||0),0);const status=sum>=Number(inv.total||0)?'paid':'sent';return sb.from('invoices').update({status,paid_at:status==='paid'?new Date().toISOString():null}).eq('id',inv.id)})}
 async function logJobActivity(jobId,event_type,message){try{await sb.from("job_activity").insert({job_id:jobId,profile_id:session.user.id,event_type,message});}catch(_){}}
@@ -1556,7 +1558,7 @@ function openCatalogPicker(){
  wrap?.querySelectorAll('[data-pick-catalog]').forEach(b=>b.addEventListener('click',()=>{addCatalogLineToEstimate(state.estimatingCatalog.find(x=>x.id===b.dataset.pickCatalog));wrap.remove();}));
 }
 function catalogPickerRows(list){return (list||[]).map(x=>`<button type="button" class="catalog-pick-row" data-pick-catalog="${x.id}"><span><b>${esc(x.name)}</b><small>${esc(x.category)} · ${esc(x.unit)}</small></span><strong>${money(x.sell_price)}</strong></button>`).join('')||'<div class="empty">No catalog items match.</div>';}
-function addCatalogLineToEstimate(item){if(!item)return;const rows=document.getElementById('estimatePageRows');if(!rows)return;const n=rows.querySelectorAll('.estimate-page-row').length;rows.insertAdjacentHTML('beforeend',estimateRow(n,{description:item.name,quantity:1,sell_price:Number(item.sell_price||0),category:item.category}));updateEstimateTotals();}
+function addCatalogLineToEstimate(item){if(!item)return;const rows=document.getElementById('estimatePageRows');if(!rows)return;const n=rows.querySelectorAll('.estimate-page-row').length;rows.insertAdjacentHTML('beforeend',estimateRow(n,{description:item.name,quantity:1,sell_price:Number(item.sell_price||0),category:item.category}));updateEstimateTotals();queueEstimateDraftSave();}
 
 function estimates(){
  if(isFieldUser()) return `<div class="card"><h2>Estimates</h2><p class="sub">Estimates are managed by the office.</p></div>`;
@@ -1566,6 +1568,62 @@ function estimates(){
  <div class="metric-grid"><div class="card metric-v2"><span>Total Estimates</span><b>${list.length}</b><small>All estimate records</small></div><div class="card metric-v2"><span>Drafts</span><b>${list.filter(e=>e.status==='draft').length}</b><small>Still being built</small></div><div class="card metric-v2"><span>Approved</span><b>${list.filter(e=>e.status==='approved').length}</b><small>Ready to move forward</small></div><div class="card metric-v2"><span>Estimated Sales</span><b>${money(total)}</b><small>Total estimate value</small></div></div>
  <section class="card"><div class="section-head"><div><div class="eyebrow">ESTIMATE PIPELINE</div><h2>All Estimates</h2></div></div><div class="estimate-list">${list.map(e=>{const j=state.jobs.find(x=>x.id===e.job_id);const c=j?.customers;return `<div class="estimate-card"><div class="estimate-card-main"><div class="eyebrow">${esc(e.estimate_number||'ESTIMATE')}</div><h3>${esc(j?.name||'Job')}</h3><p>${esc(c?.name||'Customer')}${c?.company?` · ${esc(c.company)}`:''}</p><div class="sub">Updated ${dateTimeFmt(e.updated_at||e.created_at)}</div></div><div class="estimate-card-side"><span class="status-chip status-${estimateStatusClass(e.status)}">${statusLabel(e.status)}</span><b>${money(e.total)}</b><button class="btn" data-estimate-open="${e.id}">Open</button><button class="btn" data-estimate-print="${e.id}">Document</button></div></div>`}).join('')||`<div class="empty">No estimates yet. Start one from a job or create a new estimate.</div>`}</div></section>`;
 }
+const DRAFT_GUARD_PREFIX='nolan:draft:estimate:';
+function estimateDraftKey(page){
+ const p=page||currentPage()||{};
+ return DRAFT_GUARD_PREFIX+String(p.id||('new:'+p.jobId)||'new');
+}
+function readEstimateDraft(page){
+ try{
+  const raw=localStorage.getItem(estimateDraftKey(page));
+  if(!raw)return null;
+  const d=JSON.parse(raw);
+  if(!d||d.version!==1||!Array.isArray(d.rows))return null;
+  return d;
+ }catch(_){return null}
+}
+function captureEstimateDraft(form){
+ if(!form)return null;
+ const page=currentPage()||{};
+ const rows=[...form.querySelectorAll('.estimate-page-row')].map(r=>({
+  description:String(r.querySelector('[name^="desc_"]')?.value||''),
+  quantity:String(r.querySelector('[name^="qty_"]')?.value||'1'),
+  sell_price:String(r.querySelector('[name^="price_"]')?.value||'0'),
+  category:String(r.querySelector('[name^="cat_"]')?.value||'Electrical')
+ }));
+ const get=n=>String(form.querySelector(`[name="${n}"]`)?.value??'');
+ return {version:1,savedAt:new Date().toISOString(),page:{id:page.id||null,jobId:page.jobId||null},fields:{job_id:get('job_id'),estimate_number:get('estimate_number'),status:get('status'),tax:get('tax'),terms:get('terms'),exclusions:get('exclusions')},rows};
+}
+function saveEstimateDraft(form){
+ try{
+  const d=captureEstimateDraft(form); if(!d)return;
+  localStorage.setItem(estimateDraftKey(currentPage()),JSON.stringify(d));
+  const el=document.getElementById('estimateDraftStatus');
+  if(el){el.textContent='● Draft saved';el.classList.add('saved');}
+ }catch(err){console.warn('Draft Guard save failed:',err)}
+}
+let estimateDraftTimer=null;
+function queueEstimateDraftSave(){
+ clearTimeout(estimateDraftTimer);
+ estimateDraftTimer=setTimeout(()=>saveEstimateDraft(document.getElementById('estimatePageForm')),120);
+}
+function clearEstimateDraft(page=currentPage()){
+ try{localStorage.removeItem(estimateDraftKey(page));}catch(_){ }
+}
+function discardEstimateDraft(){
+ const page=currentPage();
+ clearEstimateDraft(page);
+ render();
+ toast('Unsaved estimate draft discarded.');
+}
+function estimateDraftValues(page,existing,next){
+ const d=readEstimateDraft(page);
+ const f=d?.fields||{};
+ const baseNotes=String(existing?.notes||'');
+ const terms=(baseNotes.match(/(?:^|\n)\s*TERMS\s*(?:&|AND)?\s*(?:CONDITIONS)?\s*:\s*([\s\S]*?)(?=\n\s*EXCLUSIONS\s*:|$)/i)||[])[1]||baseNotes;
+ const exclusions=(baseNotes.match(/(?:^|\n)\s*EXCLUSIONS\s*:\s*([\s\S]*)$/i)||[])[1]||'';
+ return {draft:d,fields:{job_id:f.job_id||(existing?.job_id||page.jobId||''),estimate_number:f.estimate_number||(existing?.estimate_number||next),status:f.status||(existing?.status||'draft'),tax:f.tax!==undefined?f.tax:String(existing?.tax||0),terms:f.terms!==undefined?f.terms:terms,exclusions:f.exclusions!==undefined?f.exclusions:exclusions},rows:d?.rows?.length?d.rows:null};
+}
 function estimateEditorPage(page){
  if(isFieldUser()) return `<div class="card"><h2>Estimates</h2><p class="sub">Office-only.</p></div>`;
  const existing=state.estimates.find(x=>x.id===page.id);
@@ -1573,12 +1631,15 @@ function estimateEditorPage(page){
  const job=existing?state.jobs.find(j=>j.id===existing.job_id):(page.jobId?state.jobs.find(j=>j.id===page.jobId):null);
  const items=existing?state.estimateItems.filter(x=>x.estimate_id===existing.id):[];
  const next='EST-'+new Date().getFullYear()+'-'+String((state.estimates||[]).length+1).padStart(3,'0');
- const rows=items.length?items.map((it,i)=>estimateRow(i,it)).join(''):estimateRow(0,{description:'',quantity:1,sell_price:0,category:'Electrical'});
+ const restored=estimateDraftValues(page,existing,next);
+ const draft=restored.draft, f=restored.fields;
+ const rows=restored.rows?restored.rows.map((it,i)=>estimateRow(i,{description:it.description,quantity:Number(it.quantity||1),sell_price:Number(it.sell_price||0),category:it.category||'Electrical'})).join(''):(items.length?items.map((it,i)=>estimateRow(i,it)).join(''):estimateRow(0,{description:'',quantity:1,sell_price:0,category:'Electrical'}));
+ const draftTime=draft?.savedAt?dateTimeFmt(draft.savedAt):'';
  return `<div class="estimate-editor-page"><div class="page-back"><button class="btn" id="backButton">← Back to Estimates</button></div>
- <div class="page-heading"><div><div class="eyebrow">${existing?'EDIT ESTIMATE':'NEW ESTIMATE'}</div><h1>${existing?'Edit Estimate':'Build Estimate'}</h1><p>${job?esc(job.name)+' · '+esc(job.customers?.name||'Customer'):'Choose a job, then build the customer-facing price.'}</p></div><div class="estimate-editor-actions">${existing?`<button class="btn" id="printEstimatePage">Print Estimate</button>`:''}<button class="btn primary" form="estimatePageForm">Save Estimate</button></div></div>
- <form id="estimatePageForm" class="estimate-page-form"><section class="card"><div class="eyebrow">ESTIMATE DETAILS</div><div class="form-grid-2"><label>Job<select name="job_id" required ${existing?'disabled':''}><option value="">Select job…</option>${jobs.map(j=>`<option value="${j.id}" ${(job?.id===j.id)?'selected':''}>${esc(j.name)} — ${esc(j.customers?.name||'Customer')}</option>`).join('')}</select></label><label>Estimate Number<input name="estimate_number" value="${esc(existing?.estimate_number||next)}" required></label><label>Status<select name="status"><option value="draft" ${!existing||existing.status==='draft'?'selected':''}>Draft</option><option value="sent" ${existing?.status==='sent'?'selected':''}>Sent</option><option value="approved" ${existing?.status==='approved'?'selected':''}>Approved</option><option value="rejected" ${existing?.status==='rejected'?'selected':''}>Rejected</option></select></label><label>Tax<input name="tax" type="number" min="0" step="0.01" value="${Number(existing?.tax||0)}" placeholder="0.00"></label></div></section>
+ <div class="page-heading"><div><div class="eyebrow">${existing?'EDIT ESTIMATE':'NEW ESTIMATE'}</div><h1>${existing?'Edit Estimate':'Build Estimate'}</h1><p>${job?esc(job.name)+' · '+esc(job.customers?.name||'Customer'):'Choose a job, then build the customer-facing price.'}</p></div><div class="estimate-editor-actions">${draft?`<button class="btn draft-discard" type="button" id="discardEstimateDraft">Discard Draft</button>`:''}${existing?`<button class="btn" id="printEstimatePage">Print Estimate</button>`:''}<span id="estimateDraftStatus" class="draft-guard-status ${draft?'saved':''}">${draft?`● Draft restored · ${esc(draftTime)}`:'Draft Guard ready'}</span><button class="btn primary" form="estimatePageForm">Save Estimate</button></div></div>
+ <form id="estimatePageForm" class="estimate-page-form"><section class="card"><div class="eyebrow">ESTIMATE DETAILS</div><div class="form-grid-2"><label>Job<select name="job_id" required ${existing?'disabled':''}><option value="">Select job…</option>${jobs.map(j=>`<option value="${j.id}" ${(f.job_id===j.id||(!f.job_id&&job?.id===j.id))?'selected':''}>${esc(j.name)} — ${esc(j.customers?.name||'Customer')}</option>`).join('')}</select></label><label>Estimate Number<input name="estimate_number" value="${esc(f.estimate_number||next)}" required></label><label>Status<select name="status"><option value="draft" ${f.status==='draft'?'selected':''}>Draft</option><option value="sent" ${f.status==='sent'?'selected':''}>Sent</option><option value="approved" ${f.status==='approved'?'selected':''}>Approved</option><option value="rejected" ${f.status==='rejected'?'selected':''}>Rejected</option></select></label><label>Tax<input name="tax" type="number" min="0" step="0.01" value="${esc(f.tax||'0')}" placeholder="0.00"></label></div></section>
  <section class="card"><div class="section-head"><div><div class="eyebrow">CUSTOMER PRICING</div><h2>Line Items</h2><p class="sub">Price the work exactly how you want the customer to see it.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="openEstimateCatalog">⚡ Add From Catalog</button><button type="button" class="btn" id="addEstimatePageLine">+ Add Line</button></div></div><div class="estimate-line-head"><span>Description</span><span>Qty</span><span>Unit Price</span><span>Category</span><span></span></div><div id="estimatePageRows">${rows}</div><div class="estimate-totals-box"><div><span>Subtotal</span><b id="estimateLiveSubtotal">$0.00</b></div><div><span>Tax</span><b id="estimateLiveTax">$0.00</b></div><div class="grand"><span>Customer Total</span><b id="estimateLiveTotal">$0.00</b></div></div></section>
- <section class="card"><div class="eyebrow">CUSTOMER DOCUMENT</div><div class="form-grid-2"><label>Terms & Conditions<textarea name="terms" rows="7" placeholder="Payment terms, warranty, scheduling, change-order terms…">${esc((String(existing?.notes||'').match(/(?:^|\n)\s*TERMS\s*(?:&|AND)?\s*(?:CONDITIONS)?\s*:\s*([\s\S]*?)(?=\n\s*EXCLUSIONS\s*:|$)/i)||[])[1]||existing?.notes||'')}</textarea></label><label>Exclusions<textarea name="exclusions" rows="7" placeholder="Permits, engineering, utility fees, concealed conditions, owner-supplied items…">${esc((String(existing?.notes||'').match(/(?:^|\n)\s*EXCLUSIONS\s*:\s*([\s\S]*)$/i)||[])[1]||'')}</textarea></label></div><p class="sub">These sections appear on the customer-facing proposal. Internal costs and markup are never shown.</p></section>
+ <section class="card"><div class="eyebrow">CUSTOMER DOCUMENT</div><div class="form-grid-2"><label>Terms & Conditions<textarea name="terms" rows="7" placeholder="Payment terms, warranty, scheduling, change-order terms…">${esc(f.terms)}</textarea></label><label>Exclusions<textarea name="exclusions" rows="7" placeholder="Permits, engineering, utility fees, concealed conditions, owner-supplied items…">${esc(f.exclusions)}</textarea></label></div><p class="sub">These sections appear on the customer-facing proposal. Internal costs and markup are never shown.</p></section>
  <div class="estimate-bottom-save"><button class="btn" type="button" id="backButton2">Cancel</button><button class="btn primary" type="submit">Save Estimate</button></div></form></div>`;
 }
 function estimateRow(i,it={}){return `<div class="estimate-page-row"><input name="desc_${i}" value="${esc(it.description||'')}" placeholder="Electrical work / material" required><input name="qty_${i}" type="number" min="0.01" step="0.01" value="${Number(it.quantity||1)}"><input name="price_${i}" type="number" min="0" step="0.01" value="${Number(it.sell_price||0)}"><input name="cat_${i}" value="${esc(it.category||'Electrical')}" placeholder="Electrical"><button type="button" class="btn danger estimate-remove-line" data-remove-estimate-line="1">Remove</button></div>`}
