@@ -1,1 +1,44 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#111111"><title>Nolan Electric</title><link rel="manifest" href="manifest.webmanifest"><link rel="stylesheet" href="styles-v1078.css"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black"></head><body><div id="app"><div class="wrap" style="padding:24px"><div class="card" style="max-width:520px;margin:40px auto"><div class="brand">Nolan Electric</div><p>Starting Job Command Center…</p></div></div></div><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script src="config.js?v=1082"></script><script src="app-v1082.js?v=1082"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111111">
+<title>Nolan Electric · Job Command Center</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="styles-v1078.css">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+</head>
+<body>
+<div id="app"><div class="boot-state"><div class="card boot-card"><div class="brand">Nolan Electric</div><div class="eyebrow">JOB COMMAND CENTER</div><p>Starting Job Command Center…</p><p id="bootDetail" class="sub"></p></div></div></div>
+<script>
+window.__NOLAN_BOOT_STARTED__=Date.now();
+window.addEventListener('error',function(e){
+  if(e.target && e.target.tagName==='SCRIPT'){
+    var d=document.getElementById('bootDetail');
+    if(d)d.textContent='Could not load '+(e.target.src||'a required script')+'. Check that all V1081 files are in the same folder.';
+  }
+});
+setTimeout(function(){
+  if(!window.__NOLAN_APP_LOADED__){
+    var d=document.getElementById('bootDetail');
+    if(d)d.textContent='V108.1 JavaScript did not load. Make sure app-v1083.js is uploaded beside index.html.';
+  }
+},5000);
+setTimeout(function(){
+  var app=document.getElementById('app');
+  if(app && app.querySelector('.boot-state') && window.__NOLAN_APP_LOADED__){
+    var d=document.getElementById('bootDetail');
+    if(d)d.textContent='The app is waiting on Supabase. If this stays here, check config.js and Supabase connectivity.';
+  }
+},13000);
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onerror="document.getElementById('bootDetail').textContent='Could not load Supabase. Check your internet connection.'"></script>
+<script src="config.js?v=1072"></script>
+<script src="app-v1083.js?v=1081" onerror="document.getElementById('bootDetail').textContent='Could not load app-v1083.js. Make sure it is beside index.html.'"></script>
+</body>
+</html>
